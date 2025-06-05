@@ -10,9 +10,13 @@ class ScriptConfig:
     """
     # --- Fields WITHOUT default values ---
     model_name_or_path: str = field(metadata={"help": "Path to pretrained BASE model or model identifier from huggingface.co/models for GRPO training."})
-    dataset_path: str = field(metadata={"help": "Path to the dataset manifest JSONL file."})
+    # dataset_path can be primary for local files, dataset_name for hub datasets.
+    dataset_path: Optional[str] = field(default=None, metadata={"help": "Path to a local dataset manifest JSONL file. Used if dataset_name is not provided."})
 
     # --- Fields WITH default values ---
+    dataset_name: Optional[str] = field(default=None, metadata={"help": "The name of the dataset to use (via the datasets library). E.g., 'c4', 'wikitext'. If provided, dataset_path might be ignored or used for local loading."})
+    dataset_config_name: Optional[str] = field(default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."})
+    dataset_split: str = field(default="train", metadata={"help": "The dataset split to use (e.g., 'train', 'validation')."})
     # curriculum_stages is now Optional and has a default, so it belongs in this section.
     curriculum_stages: Optional[List[Dict[str, Any]]] = field(default=None, metadata={"help": "Detailed dual-layer curriculum stages configuration. Populated dynamically by the script if not provided."})
     # dataset_base_path, output_dir_base, cache_dir moved to EnvConfig
