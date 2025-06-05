@@ -1117,7 +1117,19 @@ def main():
     try:
         parser = HfArgumentParser((EnvConfig, ScriptConfig, EnhancedRewardConfig, GRPOConfig))
         env_cfg, script_cfg, reward_cfg, grpo_cfg = parser.parse_args_into_dataclasses()
-        
+        logging.basicConfig(
+            level=grpo_cfg.get_process_log_level(), 
+            format=f"[RANK {grpo_cfg.local_rank:02d}] %(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s",
+            handlers=log_handlers,
+            force=True, 
+        )
+
+        logger = logging.getLogger(__name__)
+        # 🚀 快速优化
+        script_cfg.max_steps = max(getattr(script_cfg, 'max_steps', 300), 300)
+        grpo_cfg.learning_rate = 1e-5
+        grpo_cfg.eval_steps = 2
+        logger.info(f"🔧 快速优化: 最大步数={script_cfg.max_steps}, 学习率={grpo_cfg.learning_rate}")
         # 将setup_enhanced_debugging函数定义移到这里，避免变量引用问题
         def setup_enhanced_debugging_local(script_cfg, grpo_cfg, curriculum_manager, experience_buffer):
             """设置增强调试功能"""
@@ -1212,14 +1224,7 @@ def main():
             file_handler = logging.FileHandler(log_file_path, mode=log_mode, encoding='utf-8')
             log_handlers.append(file_handler)
 
-        logging.basicConfig(
-            level=grpo_cfg.get_process_log_level(), 
-            format=f"[RANK {grpo_cfg.local_rank:02d}] %(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s",
-            handlers=log_handlers,
-            force=True, 
-        )
-        global logger 
-        logger = logging.getLogger(__name__)
+        
 
         # 设置状态报告器
         status_reporter = PeriodicStatusReporter(script_cfg.output_dir, report_interval=50)
