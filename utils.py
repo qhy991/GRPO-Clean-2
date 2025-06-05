@@ -718,14 +718,12 @@ class DetailedInferenceCallback(TrainerCallback):
 
             generated_tokens = outputs[0][inputs.input_ids.shape[1]:]
             raw_output = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
-
-            reasoning, code = parse_llm_completion_with_context(
+            reasoning, code = parse_llm_completion_qwen3(
                 raw_output,
-                prompt=prompt,
-                step=step,
-                sample_idx=0 # Assuming this callback processes one sample at a time for this method
+                debug_prompt=prompt,
+                debug_context={"step": step, "model": "qwen3"}
             )
-
+            
             return {
                 'reasoning': reasoning if reasoning is not None else "PARSING_FAILED_REASONING",
                 'code': code if code is not None else "PARSING_FAILED_CODE",
