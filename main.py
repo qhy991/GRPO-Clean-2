@@ -64,7 +64,7 @@ from grpo_project.callbacks.monitoring import StepLoggingCallback, DetailedRewar
 from grpo_project.callbacks.persistence import CustomStatePersistenceCallback
 from grpo_project.callbacks.inference import DetailedInferenceCallback
 from grpo_project.callbacks.wandb import DetailedWandbCallback as TrainDetailedWandbCallback
-from grpo_project.curriculum.callbacks import CurriculumProgressCallback, EnhancedCurriculumDebugCallback
+from grpo_project.curriculum.callbacks import CurriculumProgressCallback, EnhancedCurriculumDebugCallback, OptimizedCurriculumCallback
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,50 @@ class GRPOTrainingPipeline:
         except Exception as e:
             logger.error(f"❌ Failed to setup model and tokenizer: {e}", exc_info=True)
             raise
+    def _initialize_trainer(self):
+        logger.info("Initializing GRPOTrainer...")
+
+        reward_function = self._get_reward_function_with_context()
+
+        self.trainer = GRPOTrainer(
+            model=self.model,
+            args=self.grpo_cfg,
+            train_dataset=self.dataset_for_trainer,
+            reward_funcs=[reward_function],
+            tokenizer=self.tokenizer,
+            callbacks=self.callbacks,
+        )
+
+        # 🔧 重要：设置 trainer_ref 为所有需要的回调
+        for cb in self.callbacks:
+            if hasattr(cb, 'trainer_ref') and cb.trainer_ref is None:
+                cb.trainer_ref = self.trainer
+                logger.info(f"✅ Set trainer_ref for {type(cb).__name__}")
+
+        logger.info("GRPOTrainer initialized successfully.")
+
+        # 🔧 额外的课程学习状态验证
+        if self.curriculum_manager:
+            logger.info("📚 最终课程学习状态验证:")
+            logger.info(f"  - 课程管理器类型: {type(self.curriculum_manager).__name__}")
+            
+            # 验证课程管理器是否有调试日志
+            if hasattr(self.curriculum_manager, 'debug_log'):
+                logger.info(f"  - 调试日志条目: {len(self.curriculum_manager.debug_log)}")
+                if self.curriculum_manager.debug_log:
+                    logger.info(f"  - 最新日志: {self.curriculum_manager.debug_log[-1]}")
+            
+            # 验证当前阶段数据集
+            try:
+                current_dataset = self.curriculum_manager.get_current_stage_dataset()
+                logger.info(f"  - 当前数据集验证: {len(current_dataset)} samples")
+            except Exception as e:
+                logger.error(f"  - 数据集验证失败: {e}")
+
+            # 验证课程阶段配置
+            for i, stage in enumerate(self.curriculum_manager.curriculum_stages):
+                status = "🔄 当前" if i == self.curriculum_manager.current_stage else "⏳ 待进入"
+                logger.info(f"  - 阶段{i}: {stage.name} ({status})")
 
     def _initialize_components(self, dataset_processed):
         """Initialize components that depend on the processed dataset"""
@@ -225,7 +269,7 @@ class GRPOTrainingPipeline:
             raise
 
     def _setup_callbacks(self, dataset_processed):
-        """Setup all callbacks"""
+        """Setup all callbacks with enhanced curriculum debugging"""
         try:
             self.callbacks = []
             
@@ -234,15 +278,43 @@ class GRPOTrainingPipeline:
             self.callbacks.append(DetailedRewardCallback(self.script_cfg.output_dir))
             self.callbacks.append(RewardStabilityMonitor(self.script_cfg.output_dir))
 
-            # Curriculum callbacks
+            # 🔧 修复：增强的课程学习回调设置
             if self.curriculum_manager:
-                self.callbacks.append(CurriculumProgressCallback(self.curriculum_manager, None, self.script_cfg.output_dir))
-                self.callbacks.append(EnhancedCurriculumDebugCallback(self.curriculum_manager, None, self.script_cfg.output_dir))
+                # 1. 添加基础的课程进度回调
+                curriculum_progress_cb = CurriculumProgressCallback(
+                    curriculum_manager=self.curriculum_manager, 
+                    trainer_ref=None,  # 稍后设置
+                    output_dir=self.script_cfg.output_dir
+                )
+                self.callbacks.append(curriculum_progress_cb)
+                logger.info("✅ 添加 CurriculumProgressCallback")
+
+                # 2. 添加增强的课程调试回调
+                enhanced_curriculum_cb = EnhancedCurriculumDebugCallback(
+                    curriculum_manager=self.curriculum_manager, 
+                    trainer_ref=None,  # 稍后设置
+                    output_dir=self.script_cfg.output_dir
+                )
+                self.callbacks.append(enhanced_curriculum_cb)
+                logger.info("✅ 添加 EnhancedCurriculumDebugCallback")
+
+                # 3. 添加优化的课程回调（如果需要）
+                optimized_curriculum_cb = OptimizedCurriculumCallback(
+                    curriculum_manager=self.curriculum_manager,
+                    trainer_ref=None,  # 稍后设置
+                    output_dir=self.script_cfg.output_dir
+                )
+                self.callbacks.append(optimized_curriculum_cb)
+                logger.info("✅ 添加 OptimizedCurriculumCallback")
 
             # State persistence callback
-            self.callbacks.append(CustomStatePersistenceCallback(self.curriculum_manager, self.experience_buffer, self.script_cfg))
+            self.callbacks.append(CustomStatePersistenceCallback(
+                curriculum_manager=self.curriculum_manager, 
+                experience_buffer=self.experience_buffer, 
+                script_cfg=self.script_cfg
+            ))
 
-            # Inference callback (needs tokenizer)
+            # Inference callback (需要 tokenizer)
             if self.tokenizer and dataset_processed and len(dataset_processed) > 0:
                 sample_dataset_for_inf_cb = dataset_processed.select(
                     range(min(len(dataset_processed), self.script_cfg.callback_num_samples * 5))
@@ -265,24 +337,49 @@ class GRPOTrainingPipeline:
 
             # W&B callback
             if self.grpo_cfg.local_rank <= 0 and "wandb" in self.grpo_cfg.report_to:
-                self.callbacks.append(TrainDetailedWandbCallback(
+                wandb_cb = TrainDetailedWandbCallback(
                     self.env_cfg, self.script_cfg, self.reward_cfg, self.experience_buffer
-                ))
+                )
+                self.callbacks.append(wandb_cb)
+                # 存储 wandb_callback 引用供 reward function 使用
+                self.wandb_callback = wandb_cb
                 logger.info("✅ TrainDetailedWandbCallback added.")
 
             logger.info(f"Total callbacks prepared: {len(self.callbacks)}")
             
+            # 🔧 重要：确保课程学习回调有详细的初始化日志
+            if self.curriculum_manager:
+                logger.info("📚 课程学习回调详细信息:")
+                logger.info(f"  - 当前阶段: {self.curriculum_manager.current_stage}")
+                logger.info(f"  - 总阶段数: {len(self.curriculum_manager.curriculum_stages)}")
+                
+                # 记录当前阶段详情
+                if self.curriculum_manager.current_stage < len(self.curriculum_manager.curriculum_stages):
+                    current_stage = self.curriculum_manager.curriculum_stages[self.curriculum_manager.current_stage]
+                    logger.info(f"  - 当前阶段名称: {current_stage.name}")
+                    logger.info(f"  - 性能阈值: {current_stage.performance_threshold}")
+                    logger.info(f"  - 最小评估次数: {current_stage.min_evaluations}")
+                    
+                    # 记录数据集大小
+                    current_dataset = self.curriculum_manager.get_current_stage_dataset()
+                    logger.info(f"  - 当前阶段数据集大小: {len(current_dataset)}")
+
         except Exception as e:
             logger.error(f"❌ Error setting up callbacks: {e}", exc_info=True)
             # 至少保证基本的回调
             self.callbacks = [StepLoggingCallback()]
             logger.warning("⚠️ Using minimal callback setup due to errors.")
-
     def get_reward_function(self):
-        """Create reward function closure"""
+        """Create reward function closure with enhanced debugging"""
         def reward_fn_closure(prompts: List[str], completions: List[str], **kwargs_from_trainer_dataset) -> List[float]:
             try:
                 current_training_step = self.trainer.state.global_step if self.trainer and self.trainer.state else 0
+
+                # 🔧 添加详细的奖励计算日志
+                if current_training_step % 10 == 0:  # 每10步记录一次
+                    logger.info(f"🎯 步数 {current_training_step}: 开始奖励计算")
+                    logger.info(f"  - 批次大小: {len(prompts)}")
+                    logger.info(f"  - 完成长度: {[len(c) for c in completions[:3]]}{'...' if len(completions) > 3 else ''}")
 
                 batch_rewards_args = {
                     "prompts": prompts,
@@ -293,13 +390,29 @@ class GRPOTrainingPipeline:
                     "original_enhanced_prompts": kwargs_from_trainer_dataset.get('original_enhanced_prompt'),
                     "training_step": current_training_step,
                     "output_dir_for_debug": self.script_cfg.output_dir,
+                    # 🔧 确保传递正确的 wandb_callback 引用
+                    "wandb_callback_obj": getattr(self, 'wandb_callback', None),
+                    "experience_buffer_obj": self.experience_buffer,
+                    "script_config_obj": self.script_cfg
                 }
                 
-                rewards_list, _ = self.reward_calculator.calculate_batch_rewards(**batch_rewards_args)
-                return rewards_list
+                rewards_list, aggregated_metrics = self.reward_calculator.calculate_batch_rewards(**batch_rewards_args)
                 
+                # 🔧 添加奖励统计日志
+                if current_training_step % 10 == 0:
+                    reward_stats = {
+                        'mean': np.mean(rewards_list) if rewards_list else 0,
+                        'std': np.std(rewards_list) if rewards_list else 0,
+                        'min': np.min(rewards_list) if rewards_list else 0,
+                        'max': np.max(rewards_list) if rewards_list else 0
+                    }
+                    logger.info(f"  - 奖励统计: mean={reward_stats['mean']:.4f}, std={reward_stats['std']:.4f}")
+                    logger.info(f"  - 奖励范围: [{reward_stats['min']:.4f}, {reward_stats['max']:.4f}]")
+                
+                return rewards_list
+                    
             except Exception as e:
-                logger.error(f"❌ Error in reward function: {e}", exc_info=True)
+                logger.error(f"❌ Error in reward function at step {current_training_step}: {e}", exc_info=True)
                 # 返回默认奖励避免训练中断
                 return [0.0] * len(prompts)
         
@@ -333,7 +446,7 @@ class GRPOTrainingPipeline:
             dataset_for_trainer = dataset_processed
             if self.curriculum_manager:
                 dataset_for_trainer = self.curriculum_manager.get_current_stage_dataset()
-                current_stage_name = self.curriculum_manager.get_current_stage_name()
+                current_stage_name = self.curriculum_manager.get_current_stage_info()['stage_name']
                 logger.info(f"📚 Using curriculum dataset: {len(dataset_for_trainer)} samples from stage '{current_stage_name}'.")
             else:
                 logger.info(f"📚 Using full processed dataset: {len(dataset_for_trainer)} samples.")

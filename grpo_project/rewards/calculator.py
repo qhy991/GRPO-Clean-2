@@ -190,7 +190,11 @@ class RewardCalculator:
         reference_verilog_paths: List[str],
         original_enhanced_prompts: Optional[List[str]] = None, # For debug/logging if needed by _calculate_single_reward
         training_step: int = 0,
-        output_dir_for_debug: Optional[str] = None
+        output_dir_for_debug: Optional[str] = None,
+        wandb_callback_obj: Optional[Any] = None,
+        experience_buffer_obj: Optional[Any] = None,
+        script_config_obj: Optional[Any] = None,
+        **kwargs  # 添加kwargs来捕获多余参数
     ) -> Tuple[List[float], Dict[str, Any]]:
 
         batch_rewards_final_scaled: List[float] = []
