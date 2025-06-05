@@ -3,7 +3,7 @@
 
 # --- Exit on error ---
 set -e
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 # --- Get the directory where the script is located ---
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PYTHON_EXECUTABLE="python3"
