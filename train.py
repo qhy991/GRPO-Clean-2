@@ -14,21 +14,27 @@ import math
 from transformers.trainer_callback import DefaultFlowCallback
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel, prepare_model_for_kbit_training
 from enhanced_debugging_and_fixes import (
-    EnhancedCurriculumDebugCallback, 
+    # EnhancedCurriculumDebugCallback, # Will be imported from grpo_project.curriculum.callbacks
     Qwen3CompatibilityFixer,
-    RewardStabilityMonitor,
+    # RewardStabilityMonitor, # Will be imported from grpo_project.callbacks.monitoring
     integrate_enhanced_debugging
 )
-from curriculum_debug_config import (
-    FixedEnhancedCurriculumManager,
-    setup_fixed_curriculum_manager
-)
+# FixedEnhancedCurriculumManager and setup_fixed_curriculum_manager will be imported from grpo_project.curriculum.manager
+# from curriculum_debug_config import (
+#     FixedEnhancedCurriculumManager,
+#     setup_fixed_curriculum_manager
+# )
+from grpo_project.callbacks.monitoring import RewardStabilityMonitor # Moved from enhanced_debugging_and_fixes
 from qwen3_prompt_fix import (
-    wrap_prompt_for_qwen3,
-    parse_llm_completion_qwen3,
-    qwen3_dataset_processing_pipeline,
+    parse_llm_completion_qwen3, # wrap_prompt_for_qwen3 is moved
+    # qwen3_dataset_processing_pipeline is moved
     setup_qwen3_generation_config
 )
+from grpo_project.data.preprocessing import (
+    VerilogDataPreprocessor, # Will be used for qwen3_dataset_processing_pipeline
+    enhance_dataset_with_level_and_complexity # Moved from train.py
+)
+from grpo_project.data.validation import validate_dataset_for_curriculum # Moved from train.py
 # --- BEGIN: PyTorch Safe Unpickling Configuration ---
 logger_temp = logging.getLogger(__name__ + "_startup")
 try:
@@ -133,198 +139,51 @@ from transformers import (
 import wandb
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel, prepare_model_for_kbit_training
 
-from utils import (
-    extract_module_info,  validate_verilog_code,
+from utils import ( # Callbacks that were in utils.py are now moved to grpo_project.callbacks
+    ExperienceBuffer, # This remains in utils for now, to be moved later
+    monitor_advanced_stage_training # This remains in utils for now
+    # DetailedWandbCallback from utils is now GenericWandbCallback
+)
+from grpo_project.callbacks.inference import EnhancedInferenceCallback, DetailedInferenceCallback
+# Qwen3InferenceCallback was also moved but not directly used in train.py's top-level imports
+from grpo_project.callbacks.monitoring import StepLoggingCallback, DetailedRewardCallback
+# DetailedWandbCallback from train.py is now in grpo_project.callbacks.wandb_callbacks
+from grpo_project.callbacks.wandb_callbacks import DetailedWandbCallback as TrainDetailedWandbCallback # Alias to avoid clash if any other DetailedWandbCallback is imported
+from grpo_project.callbacks.persistence import CustomStatePersistenceCallback
+from grpo_project.utils import (
+    extract_module_info, validate_verilog_code,
     run_iverilog_simulation, validate_and_update_dataset_paths, enhance_prompt_func,
-    EnhancedInferenceCallback,  assess_code_quality,DetailedInferenceCallback,
-    assess_design_complexity, ExperienceBuffer,  StepLoggingCallback, monitor_advanced_stage_training
+    assess_code_quality, assess_design_complexity,
+    debug_checkpoint_contents, PeriodicStatusReporter
+)
+from grpo_project.utils.logging_utils import setup_global_logging
+from grpo_project.rewards import RewardCalculator # New import for RewardCalculator
+# from config import EnvConfig, ScriptConfig, EnhancedRewardConfig # Old imports
+from grpo_project.configs import EnvConfig, ScriptConfig, EnhancedRewardConfig, OptimizedTrainingConfig, apply_optimized_config # New imports
+# enhanced_curriculum content is now in grpo_project.curriculum
+# from enhanced_curriculum import (
+#     EnhancedCurriculumManager, CurriculumStageConfig,
+#     create_default_curriculum_stages, create_custom_curriculum_stages
+# )
+from grpo_project.curriculum.manager import (
+    EnhancedCurriculumManager, FixedEnhancedCurriculumManager,
+    setup_enhanced_curriculum_manager, setup_fixed_curriculum_manager
+)
+from grpo_project.curriculum.stages import CurriculumStageConfig, create_default_curriculum_stages, create_custom_curriculum_stages
+from grpo_project.curriculum.callbacks import CurriculumProgressCallback, OptimizedCurriculumCallback, EnhancedCurriculumDebugCallback
 
-)
-from config import EnvConfig, ScriptConfig, EnhancedRewardConfig 
-from enhanced_curriculum import (
-    EnhancedCurriculumManager, CurriculumStageConfig,
-    create_default_curriculum_stages, create_custom_curriculum_stages
-)
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-class DetailedWandbCallback(TrainerCallback):
-    """增强的 W&B 日志回调"""
-    
-    def __init__(self, env_cfg, script_cfg, reward_cfg, experience_buffer=None):
-        self.env_cfg = env_cfg
-        self.script_cfg = script_cfg 
-        self.reward_cfg = reward_cfg
-        self.experience_buffer = experience_buffer
-        self.step_count = 0
-        self.recent_rewards = deque(maxlen=100) # Added
-        
-    def on_init_end(self, args, state, control, **kwargs):
-        if not getattr(self.env_cfg, 'wandb_disable', False):
-            import wandb
-            wandb.init(
-                project=getattr(self.env_cfg, 'wandb_project', 'grpo-training'),
-                name=getattr(self.env_cfg, 'wandb_run_name', None),
-                config={
-                    **asdict(self.script_cfg),
-                    **asdict(self.reward_cfg),
-                    "trainer_args": args.to_dict()
-                }
-            )
-            logger.info("🚀 W&B 初始化完成")
-    
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        if logs is None or getattr(self.env_cfg, 'wandb_disable', False):
-            return
-            
-        try:
-            import wandb
-            if wandb.run is None:
-                return
-                
-            # 🔧 修复：安全获取global_step
-            current_step = getattr(state, 'global_step', 0) or 0
-            self.step_count = current_step
-            
-            # 准备日志数据
-            wandb_logs = {}
-            for key, value in logs.items():
-                if isinstance(value, (int, float)) and not (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
-                    wandb_logs[f"train/{key}"] = value
-            
-            # 添加经验缓冲区统计信息
-            if self.experience_buffer:
-                buffer_stats = self.experience_buffer.get_stats()
-                for key, value in buffer_stats.items():
-                    if isinstance(value, (int, float)):
-                        wandb_logs[f"experience_buffer/{key}"] = value
-            
-            # 记录到W&B
-            if wandb_logs:
-                wandb.log(wandb_logs, step=current_step)
+# DetailedWandbCallback class definition was here. It has been moved to grpo_project/callbacks/wandb_callbacks.py
 
-            if self.recent_rewards:
-                try:
-                    wandb.log({"reward_distribution": wandb.Histogram(np.array(self.recent_rewards))}, step=current_step)
-                    # Optional: Clear recent_rewards after logging histogram if it's preferred to log distribution of rewards *since last log*
-                    # self.recent_rewards.clear()
-                except Exception as e_hist:
-                    logger.warning(f"Failed to log reward histogram to W&B: {e_hist}")
-                
-        except Exception as e_wandb:
-            logger.warning(f"W&B 日志记录失败: {e_wandb}")
-
-    def add_reward(self, reward: float):
-        if getattr(self.env_cfg, 'wandb_disable', False) or (hasattr(wandb, 'run') and wandb.run is None):
-            return
-        self.recent_rewards.append(reward)
-
-    def log_reward_components(self, reward_components: Dict[str, float]):
-        """Log detailed reward component breakdown."""
-        try:
-            # import wandb # Already imported if needed
-            if hasattr(wandb, 'run') and wandb.run is not None and not getattr(self.env_cfg, 'wandb_disable', False):
-                wandb.log({f"reward_components/{k}": v for k, v in reward_components.items()})
-        except Exception as e:
-            logger.warning(f"Failed to log reward components: {e}")
-
-    # log_reward method is now effectively replaced by add_reward for histogram purposes.
-    # If individual reward logging per completion by this callback is still desired (outside GRPOTrainer's own logging),
-    # it would need a different name or logic. For now, assuming add_reward covers the primary need.
-    # def log_reward(self, reward: float):
-    #     """Log individual reward values."""
-    #     try:
-    #         # import wandb
-    #         if hasattr(wandb, 'run') and wandb.run is not None:
-    #             wandb.log({"reward": reward}) # This might be redundant if GRPOTrainer logs rewards
-    #     except Exception as e:
-    #         logger.warning(f"Failed to log reward: {e}")
-
-    def log_batch_aggregated_metrics(self, metrics: Dict[str, Any], step: Optional[int] = None):
-        """Logs batch-aggregated metrics (unscaled rewards, funnel stats) to W&B."""
-        if getattr(self.env_cfg, 'wandb_disable', False) or not metrics:
-            return
-
-        try:
-            import wandb
-            if wandb.run is None:
-                logger.warning("W&B run not initialized. Skipping log_batch_aggregated_metrics.")
-                return
-
-            # Determine the step for logging
-            log_step = step
-            if log_step is None: # Fallback if step not directly provided
-                # Try to get from internal step_count or default to None (W&B might auto-increment)
-                log_step = self.step_count if hasattr(self, 'step_count') and self.step_count > 0 else None
-
-            # Filter out non-numeric or problematic values before logging
-            sanitized_metrics = {}
-            for key, value in metrics.items():
-                if isinstance(value, (int, float)) and not (isinstance(value, float) and (math.isnan(value) or math.isinf(value))):
-                    sanitized_metrics[key] = value
-                elif isinstance(value, (np.float32, np.float64, np.int32, np.int64)): # Handle numpy types
-                    if not (np.isnan(value) or np.isinf(value)):
-                         sanitized_metrics[key] = float(value) # Convert to standard Python float
-                # else: skip non-numeric or problematic values like NaN/Inf
-
-            if sanitized_metrics:
-                if log_step is not None:
-                    wandb.log(sanitized_metrics, step=log_step)
-                else: # If step is still None, log without explicit step
-                    wandb.log(sanitized_metrics)
-                logger.debug(f"Logged batch-aggregated metrics to W&B (step {log_step if log_step is not None else 'auto'}): {list(sanitized_metrics.keys())}")
-            else:
-                logger.debug("No valid batch-aggregated metrics to log after sanitization.")
-
-        except ImportError:
-            logger.warning("W&B module not found. Cannot log batch_aggregated_metrics.")
-        except Exception as e_wandb_agg:
-            logger.error(f"Error logging batch-aggregated metrics to W&B: {e_wandb_agg}", exc_info=True)
+# CustomStatePersistenceCallback class definition was here. It has been moved to grpo_project/callbacks/persistence.py
 
 
-class CustomStatePersistenceCallback(TrainerCallback):
-    def __init__(self, 
-                 curriculum_manager: Optional[EnhancedCurriculumManager], 
-                 experience_buffer: Optional[ExperienceBuffer],
-                 script_cfg: ScriptConfig): 
-        self.curriculum_manager = curriculum_manager
-        self.experience_buffer = experience_buffer
-        self.script_cfg = script_cfg 
-
-    def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        # 🔧 修复：安全获取global_step
-        current_step = getattr(state, 'global_step', 0) or 0
-        checkpoint_folder = os.path.join(args.output_dir, f"checkpoint-{current_step}")
-        os.makedirs(checkpoint_folder, exist_ok=True) 
-        logger.debug(f"CustomStatePersistenceCallback: 正在向 checkpoint 文件夹保存自定义状态: {checkpoint_folder}")
-
-        if self.curriculum_manager:
-            curriculum_state = self.curriculum_manager.get_curriculum_state()
-            file_path = os.path.join(checkpoint_folder, "enhanced_curriculum_state.json")
-            try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(curriculum_state, f, indent=2)
-                logger.info(f"已保存课程学习状态到: {file_path}")
-            except Exception as e:
-                logger.error(f"保存课程学习状态失败 ({file_path}): {e}")
-
-        if self.experience_buffer and self.script_cfg.enable_experience_replay: 
-            buffer_state = self.experience_buffer.get_buffer_state()
-            file_path = os.path.join(checkpoint_folder, "enhanced_experience_buffer_state.json")
-            try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(buffer_state, f, indent=2) 
-                logger.info(f"已保存经验回放池状态到: {file_path}")
-            except TypeError as te:
-                logger.warning(f"经验回放池内容可能不是完全 JSON 可序列化，保存尝试失败 ({file_path}): {te}。请检查经验条目格式。")
-            except Exception as e:
-                logger.error(f"保存经验回放池状态失败 ({file_path}): {e}")
-
-
-def validate_dataset_for_curriculum(dataset: Dataset, script_cfg: ScriptConfig) -> bool:
-    if dataset is None:
-        logger.error("Dataset is None, cannot validate for curriculum learning")
+def validate_dataset_for_curriculum(dataset: Dataset, script_cfg: ScriptConfig) -> bool: # Definition is now in grpo_project.data.validation
+#     if dataset is None:
+#         logger.error("Dataset is None, cannot validate for curriculum learning")
         return False
     
     if len(dataset) == 0:
@@ -367,90 +226,90 @@ def validate_dataset_for_curriculum(dataset: Dataset, script_cfg: ScriptConfig) 
                 if min_complexity < 0 or max_complexity > 10:
                     logger.warning(f"Complexity scores outside expected range [0-10]: {min_complexity:.2f} - {max_complexity:.2f}")
     
-    logger.info("Dataset validation for curriculum learning completed")
-    return True
+    # logger.info("Dataset validation for curriculum learning completed")
+    # return True
 
 
-def setup_curriculum_manager(script_cfg: ScriptConfig, dataset: Dataset) -> Optional[EnhancedCurriculumManager]:
-    if not script_cfg.enable_curriculum:
-        logger.info("Curriculum learning disabled.")
-        return None
-    
-    if dataset is None:
-        logger.error("Cannot setup curriculum manager with None dataset")
-        return None
-    
-    has_level_info = False
-    if len(dataset) > 0:
-        first_example = dataset[0]
-        # Ensure 'level' exists and is not None. Also handle cases where it might be an empty string.
-        has_level_info = 'level' in first_example and first_example['level'] is not None and str(first_example['level']).strip() != ""
-    
-    if not has_level_info:
-        logger.warning("Dataset does not contain valid 'level' field data. Curriculum learning will use complexity-only or default stages.")
-        # Avoid forcing complexity_only if user explicitly set another type, let it fall to default.
-        if script_cfg.curriculum_type == "dual_layer" or script_cfg.curriculum_type == "level_only":
-            logger.info(f"Switching curriculum type from '{script_cfg.curriculum_type}' to 'complexity_only' due to missing level info.")
-            script_cfg.curriculum_type = "complexity_only"
-    
-    curriculum_stages_config_list = []
+# def setup_curriculum_manager(script_cfg: ScriptConfig, dataset: Dataset) -> Optional[EnhancedCurriculumManager]: # MOVED to grpo_project.curriculum.manager
+#     if not script_cfg.enable_curriculum:
+#         logger.info("Curriculum learning disabled.")
+#         return None
+#
+#     if dataset is None: # This line and below were part of the original function, ensuring they are commented.
+#         logger.error("Cannot setup curriculum manager with None dataset")
+#         return None
+#
+#     has_level_info = False
+#     if len(dataset) > 0:
+#         first_example = dataset[0]
+#         # Ensure 'level' exists and is not None. Also handle cases where it might be an empty string.
+#         has_level_info = 'level' in first_example and first_example['level'] is not None and str(first_example['level']).strip() != ""
+#
+#     if not has_level_info:
+#         logger.warning("Dataset does not contain valid 'level' field data. Curriculum learning will use complexity-only or default stages.")
+#         # Avoid forcing complexity_only if user explicitly set another type, let it fall to default.
+#         if script_cfg.curriculum_type == "dual_layer" or script_cfg.curriculum_type == "level_only":
+#             logger.info(f"Switching curriculum type from '{script_cfg.curriculum_type}' to 'complexity_only' due to missing level info.")
+#             script_cfg.curriculum_type = "complexity_only"
+#
+#     curriculum_stages_config_list = []
+#
+#     if script_cfg.curriculum_type == "dual_layer" and has_level_info:
+#         logger.info(f"Dynamically generating dual_layer curriculum stages with focus: {script_cfg.curriculum_focus_levels}, emphasis: {script_cfg.curriculum_complexity_emphasis}")
+#
+#         level_counts_dist = {}
+#         complexity_by_level_dist = {}
+#         if dataset and len(dataset) > 0:
+#             for example in dataset:
+#                 level = example.get('level', 'unknown').lower()
+#                 complexity = example.get('complexity_score', 5.0)
+#                 level_counts_dist[level] = level_counts_dist.get(level, 0) + 1
+#                 if level not in complexity_by_level_dist:
+#                     complexity_by_level_dist[level] = []
+#                 complexity_by_level_dist[level].append(complexity)
+#
+#         dataset_distribution_for_stages = {
+#             'level_counts': level_counts_dist,
+#             'complexity_by_level': complexity_by_level_dist,
+#             'total_samples': len(dataset) if dataset else 0
+#         }
+#
+#         curriculum_stages_config_list = create_custom_curriculum_stages(
+#             dataset_distribution=dataset_distribution_for_stages,
+#             focus_levels=script_cfg.curriculum_focus_levels, # Assumed to be List[str] from HfArgumentParser
+#             complexity_emphasis=script_cfg.curriculum_complexity_emphasis
+#         )
+#         logger.info(f"Generated {len(curriculum_stages_config_list)} custom stages for dual_layer.")
+#     else:
+#         if script_cfg.curriculum_type != "dual_layer" and has_level_info : # e.g. level_only, but we are simplifying
+#             logger.info(f"Curriculum type is '{script_cfg.curriculum_type}'. Using default stages as specific logic for this type (other than dual_layer) is not implemented here, or conditions not met.")
+#         elif not has_level_info and script_cfg.curriculum_type != "complexity_only": # User might have set dual_layer/level_only but data is missing
+#             logger.info(f"Dataset lacks level information for '{script_cfg.curriculum_type}'. Falling back to default (likely complexity-based) stages.")
+#
+#         curriculum_stages_config_list = create_default_curriculum_stages() # Handles complexity_only or serves as fallback
+#         logger.info(f"Generated {len(curriculum_stages_config_list)} default stages (type: {script_cfg.curriculum_type}).")
+#
+#     if curriculum_stages_config_list:
+#         for stage_config_item in curriculum_stages_config_list:
+#             if isinstance(stage_config_item, CurriculumStageConfig):
+#                 stage_config_item.min_evaluations = 10
+#             else:
+#                 logger.warning(f"Encountered non-CurriculumStageConfig item in list: {type(stage_config_item)}")
+#         logger.info(f"Ensured min_evaluations is 10 for all {len(curriculum_stages_config_list)} stages.")
+#     else:
+#         logger.warning("No curriculum stages were generated. Curriculum learning might be ineffective.")
+#         return None
+#
+#     if not curriculum_stages_config_list:
+#         logger.error("No curriculum stages defined after attempting generation. Disabling curriculum learning.")
+#         return None
+#
+#     return EnhancedCurriculumManager(curriculum_stages_config_list, dataset)
 
-    if script_cfg.curriculum_type == "dual_layer" and has_level_info:
-        logger.info(f"Dynamically generating dual_layer curriculum stages with focus: {script_cfg.curriculum_focus_levels}, emphasis: {script_cfg.curriculum_complexity_emphasis}")
 
-        level_counts_dist = {}
-        complexity_by_level_dist = {}
-        if dataset and len(dataset) > 0:
-            for example in dataset:
-                level = example.get('level', 'unknown').lower()
-                complexity = example.get('complexity_score', 5.0)
-                level_counts_dist[level] = level_counts_dist.get(level, 0) + 1
-                if level not in complexity_by_level_dist:
-                    complexity_by_level_dist[level] = []
-                complexity_by_level_dist[level].append(complexity)
-
-        dataset_distribution_for_stages = {
-            'level_counts': level_counts_dist,
-            'complexity_by_level': complexity_by_level_dist,
-            'total_samples': len(dataset) if dataset else 0
-        }
-
-        curriculum_stages_config_list = create_custom_curriculum_stages(
-            dataset_distribution=dataset_distribution_for_stages,
-            focus_levels=script_cfg.curriculum_focus_levels, # Assumed to be List[str] from HfArgumentParser
-            complexity_emphasis=script_cfg.curriculum_complexity_emphasis
-        )
-        logger.info(f"Generated {len(curriculum_stages_config_list)} custom stages for dual_layer.")
-    else:
-        if script_cfg.curriculum_type != "dual_layer" and has_level_info : # e.g. level_only, but we are simplifying
-            logger.info(f"Curriculum type is '{script_cfg.curriculum_type}'. Using default stages as specific logic for this type (other than dual_layer) is not implemented here, or conditions not met.")
-        elif not has_level_info and script_cfg.curriculum_type != "complexity_only": # User might have set dual_layer/level_only but data is missing
-            logger.info(f"Dataset lacks level information for '{script_cfg.curriculum_type}'. Falling back to default (likely complexity-based) stages.")
-        
-        curriculum_stages_config_list = create_default_curriculum_stages() # Handles complexity_only or serves as fallback
-        logger.info(f"Generated {len(curriculum_stages_config_list)} default stages (type: {script_cfg.curriculum_type}).")
-
-    if curriculum_stages_config_list:
-        for stage_config_item in curriculum_stages_config_list:
-            if isinstance(stage_config_item, CurriculumStageConfig):
-                stage_config_item.min_evaluations = 10
-            else:
-                logger.warning(f"Encountered non-CurriculumStageConfig item in list: {type(stage_config_item)}")
-        logger.info(f"Ensured min_evaluations is 10 for all {len(curriculum_stages_config_list)} stages.")
-    else:
-        logger.warning("No curriculum stages were generated. Curriculum learning might be ineffective.")
-        return None
-
-    if not curriculum_stages_config_list:
-        logger.error("No curriculum stages defined after attempting generation. Disabling curriculum learning.")
-        return None
-
-    return EnhancedCurriculumManager(curriculum_stages_config_list, dataset)
-
-
-def enhance_dataset_with_level_and_complexity(dataset: Dataset) -> Dataset:
-    if not dataset or len(dataset) == 0:
-        logger.warning("enhance_dataset_with_level_and_complexity: Received empty or None dataset.")
+# def enhance_dataset_with_level_and_complexity(dataset: Dataset) -> Dataset: # Moved to grpo_project.data.preprocessing
+    # if not dataset or len(dataset) == 0:
+    #     logger.warning("enhance_dataset_with_level_and_complexity: Received empty or None dataset.")
         return dataset
 
     def process_example(example):
@@ -504,220 +363,16 @@ def enhance_dataset_with_level_and_complexity(dataset: Dataset) -> Dataset:
         return enhanced_dataset
         
     except Exception as e:
-        logger.error(f"Failed to enhance dataset: {e}", exc_info=True)
-        return dataset 
+        # logger.error(f"Failed to enhance dataset: {e}", exc_info=True)
+        # return dataset
 
-def calculate_enhanced_rewards_for_single_prompt(
-    prompt_str: str, 
-    completions_for_this_prompt: List[str], 
-    current_tb_path: str,
-    current_expected_total_from_manifest: int, 
-    current_ref_verilog_path: str,
-    reward_config: EnhancedRewardConfig,
-    training_step: int = 0,
-    wandb_callback: Optional[DetailedWandbCallback] = None, 
-    output_dir_for_debug: Optional[str] = None 
-) -> List[Dict[str, Any]]: # Return list of dicts now
-    detailed_results_for_prompt: List[Dict[str, Any]] = [] # Changed from prompt_rewards
-    num_completions = len(completions_for_this_prompt)
-    
-    prompt_id_base = prompt_str.split('\n', 1)[0] 
-    name_match_for_id = re.search(r"module MUST be named `(\w+)`", prompt_str, re.IGNORECASE)
-    if name_match_for_id:
-        prompt_id_base = f"Mod_{name_match_for_id.group(1)}"
-    
-    sanitized_prompt_id_for_file = re.sub(r'[^\w_.)( -]', '', prompt_id_base).strip().replace(' ', '_')[:50]
-    if not sanitized_prompt_id_for_file: 
-        sanitized_prompt_id_for_file = "unknown_prompt"
-    prompt_id_for_log = prompt_id_base[:70]
-
-    logger.debug(f"ENHANCED_REWARDS: For '{prompt_id_for_log}', processing {num_completions} completion(s).")
-    
-    module_name, req_ports = "", [] 
-    if current_ref_verilog_path and os.path.exists(current_ref_verilog_path):
-        module_name, req_ports = extract_module_info(current_ref_verilog_path)
-    
-    if not module_name:
-        logger.error(f"ENHANCED_REWARDS: '{prompt_id_for_log}': Failed to extract module info from ref Verilog '{current_ref_verilog_path}' or path invalid.")
-        # Return structure consistent with new output type
-        error_reward_val = reward_config.get_scaled_reward(reward_config.compilation_failure * 2, training_step)
-        error_result_item = {
-            "final_reward": error_reward_val,
-            "unscaled_components": {"functional": 0.0, "efficiency": 0.0, "readability": 0.0, "robustness": 0.0, "base_compilation": reward_config.compilation_failure * 2},
-            "funnel_metrics": {"code_extracted": False, "compiled_successfully": False, "sim_ran_successfully": False, "passed_tests": -1}
-        }
-        return [error_result_item] * num_completions
-
-    for j, full_output in enumerate(completions_for_this_prompt):
-        log_pref = f"ENHANCED_REWARDS: '{prompt_id_for_log}', Completion {j+1}/{num_completions}"
-        # Initialize unscaled reward components for this completion
-        current_unscaled_components = {"functional": 0.0, "efficiency": 0.0, "readability": 0.0, "robustness": 0.0, "base_compilation": 0.0}
-        current_funnel_metrics = {"code_extracted": False, "compiled_successfully": False, "sim_ran_successfully": False, "passed_tests": -1}
-        
-        if not isinstance(full_output, str):
-            logger.error(f"{log_pref}: Output is not a string, type: {type(full_output)}.")
-            total_reward = reward_config.get_scaled_reward(reward_config.compilation_failure * 2, training_step)
-            current_unscaled_components["base_compilation"] = reward_config.compilation_failure * 2 # reflect penalty
-            detailed_results_for_prompt.append({
-                "final_reward": total_reward,
-                "unscaled_components": current_unscaled_components,
-                "funnel_metrics": current_funnel_metrics
-            })
-            continue
-
-        # Log raw model output
-        raw_output_len = len(full_output)
-        if raw_output_len > 1000: # Log snippet if too long
-            logger.debug(f"{log_pref}: Raw model output (len={raw_output_len}):\n{full_output[:500]}\n...\n{full_output[-500:]}")
-        else:
-            logger.debug(f"{log_pref}: Raw model output (len={raw_output_len}):\n{full_output}")
-
-        _, code = parse_llm_completion_qwen3(
-            full_output, 
-            debug_prompt=prompt_str,  # 传递原始prompt
-            debug_context={"step": training_step, "sample_idx": j, "model": "qwen3"}
-        )
-        print("*"*100)
-        print(f"{prompt_str=}")
-        print(f"{full_output=}")
-        print("*"*100)
-        # Log extracted code
-        if code and code.strip():
-            logger.debug(f"{log_pref}: Extracted code:\n{code}")
-            current_funnel_metrics["code_extracted"] = True
-        else:
-            logger.debug(f"{log_pref}: Extracted code: None or empty.")
-            current_funnel_metrics["code_extracted"] = False # Explicitly set
-
-        if not code or not code.strip(): 
-            penalty_type = reward_config.missing_code_block_penalty if not code else reward_config.compilation_failure
-            current_unscaled_components["base_compilation"] = penalty_type # Store unscaled penalty
-            log_msg = "No Verilog code block found" if not code else "Empty code block"
-            logger.warning(f"{log_pref}: {log_msg} in output.")
-            
-            if output_dir_for_debug and not current_funnel_metrics["code_extracted"]: # Check funnel metric
-                try:
-                    debug_save_dir = os.path.join(output_dir_for_debug, "debug_no_code_outputs")
-                    os.makedirs(debug_save_dir, exist_ok=True)
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    filename = f"step_{training_step}_prompt_{sanitized_prompt_id_for_file}_compl_{j}_{timestamp}.txt"
-                    filepath = os.path.join(debug_save_dir, filename)
-                    with open(filepath, "w", encoding="utf-8") as f_debug:
-                        f_debug.write(f"--- PROMPT (Original ID for log: {prompt_id_for_log}) ---\n{prompt_str}\n\n")
-                        f_debug.write(f"--- COMPLETION INDEX: {j} ---\n\n--- FULL MODEL OUTPUT ---\n{full_output}")
-                    logger.info(f"{log_pref}: Saved problematic (no code) output to {filepath}")
-                except Exception as e_save:
-                    logger.error(f"{log_pref}: Failed to save debug output: {e_save}")
-            
-            total_reward = reward_config.get_scaled_reward(current_unscaled_components["base_compilation"], training_step)
-            detailed_results_for_prompt.append({
-                "final_reward": total_reward,
-                "unscaled_components": current_unscaled_components,
-                "funnel_metrics": current_funnel_metrics
-            })
-            continue
-            
-        quality_metrics = assess_code_quality(code)
-        current_unscaled_components["efficiency"] = (
-            quality_metrics.get("efficiency", 0) * reward_config.code_efficiency_bonus +
-            quality_metrics.get("structure", 0) * reward_config.synthesis_friendly_bonus -
-            max(0, (1 - quality_metrics.get("complexity", 1)) * reward_config.code_complexity_penalty)
-        )
-        current_unscaled_components["readability"] = quality_metrics.get("readability", 0) * reward_config.code_readability_bonus
-
-        is_valid, err_msg = validate_verilog_code(code, module_name, req_ports)
-        # Log validation result
-        if is_valid:
-            logger.debug(f"{log_pref}: Verilog validation: is_valid=True, err_msg=\"{err_msg}\"")
-        else:
-            logger.info(f"{log_pref}: Verilog validation: is_valid=False, err_msg=\"{err_msg}\"")
-            current_unscaled_components["base_compilation"] = reward_config.compilation_failure
-
-        if is_valid: # Only proceed to simulation if valid
-            sim_res = run_iverilog_simulation(
-                code, current_tb_path, current_expected_total_from_manifest,
-                prompt_id_for_log, j, logger.isEnabledFor(logging.DEBUG) 
-            )
-            # Log simulation result
-            logger.debug(f"{log_pref}: Simulation results: {sim_res}")
-            current_funnel_metrics["compiled_successfully"] = sim_res["compilation_success"]
-
-            if not sim_res["compilation_success"]:
-                current_unscaled_components["base_compilation"] = reward_config.compilation_failure
-                logger.info(f"{log_pref}: Compilation FAILED. Error: {sim_res.get('error_message', 'N/A')}")
-            else:
-                current_unscaled_components["base_compilation"] = reward_config.compilation_success
-                current_funnel_metrics["sim_ran_successfully"] = sim_res["simulation_run_success"]
-                if not sim_res["simulation_run_success"]:
-                    current_unscaled_components["functional"] = reward_config.simulation_crash
-                    logger.info(f"{log_pref}: Simulation CRASHED.")
-                elif not sim_res["parsing_success"]:
-                    current_unscaled_components["functional"] = reward_config.output_parse_error
-                    logger.info(f"{log_pref}: Output parsing FAILED.")
-                else:
-                    p, total_tests_in_output = sim_res["passed_tests"], sim_res["total_tests_in_output"]
-                    current_funnel_metrics["passed_tests"] = p
-                    if total_tests_in_output > 0:
-                        pass_ratio = p / total_tests_in_output
-                        base_functional = pass_ratio * reward_config.max_functional_reward
-                        if p > 1: # Apply bonus only if more than one test passed
-                            bonus_factor = reward_config.test_pass_bonus_multiplier ** (p - 1) # Exponential bonus
-                            base_functional *= min(bonus_factor, 2.0) # Cap bonus to 2x
-                        current_unscaled_components["functional"] = base_functional
-                        if sim_res["all_tests_passed_by_tb"] and p == total_tests_in_output: # All TB tests passed
-                            current_unscaled_components["robustness"] = reward_config.all_tests_passed_bonus
-                        if p == total_tests_in_output and total_tests_in_output >= 5: # Consider this as good edge case handling
-                            current_unscaled_components["robustness"] += reward_config.edge_case_handling_bonus
-                    elif sim_res["all_tests_passed_by_tb"]: # No tests in output, but TB says PASS
-                        current_unscaled_components["functional"] = reward_config.max_functional_reward
-                        current_unscaled_components["robustness"] = reward_config.all_tests_passed_bonus
-                        current_funnel_metrics["passed_tests"] = total_tests_in_output # Assume all expected passed if TB says so
-                    else: # Parsing success but 0 tests passed or other issues
-                        current_unscaled_components["functional"] = reward_config.output_parse_error # Or a specific penalty for 0 tests
-                    logger.info(f"{log_pref}: Functional tests - Passed: {p}/{total_tests_in_output}, Overall: {sim_res['all_tests_passed_by_tb']}")
-        # else: is_valid was false, base_compilation already set to failure penalty
-
-        unscaled_total_reward = (
-            reward_config.functional_weight * current_unscaled_components["functional"] +
-            reward_config.efficiency_weight * current_unscaled_components["efficiency"] +
-            reward_config.readability_weight * current_unscaled_components["readability"] +
-            reward_config.robustness_weight * current_unscaled_components["robustness"] +
-            current_unscaled_components["base_compilation"] # This is already a value like +1 or -5
-        )
-        final_scaled_reward = reward_config.get_scaled_reward(unscaled_total_reward, training_step)
-        
-        # For per-completion W&B logging (if still desired, now uses unscaled for components)
-        if wandb_callback:
-            # wandb_callback.log_reward_components(current_unscaled_components) # Log unscaled version
-            wandb_callback.add_reward(final_scaled_reward) # Changed: Log final scaled reward for this completion for histogram
-        
-        logger.info(
-            f"{log_pref}: Unscaled Rewards - Func:{current_unscaled_components['functional']:.2f} Eff:{current_unscaled_components['efficiency']:.2f} "
-            f"Read:{current_unscaled_components['readability']:.2f} Rob:{current_unscaled_components['robustness']:.2f} "
-            f"BaseComp:{current_unscaled_components['base_compilation']:.2f}. UnscaledTotal: {unscaled_total_reward:.2f}. FinalScaled: {final_scaled_reward:.2f}"
-        )
-        detailed_results_for_prompt.append({
-            "final_reward": final_scaled_reward,
-            "unscaled_components": current_unscaled_components,
-            "funnel_metrics": current_funnel_metrics
-        })
-    
-    if len(detailed_results_for_prompt) != num_completions:
-        logger.critical(f"ENHANCED_REWARDS: '{prompt_id_for_log}': Result list length mismatch. Padding.")
-        error_reward_val = reward_config.get_scaled_reward(reward_config.compilation_failure * 3, training_step)
-        error_result_item = {
-            "final_reward": error_reward_val,
-            "unscaled_components": {"functional": 0.0, "efficiency": 0.0, "readability": 0.0, "robustness": 0.0, "base_compilation": reward_config.compilation_failure * 3},
-            "funnel_metrics": {"code_extracted": False, "compiled_successfully": False, "sim_ran_successfully": False, "passed_tests": -1}
-        }
-        detailed_results_for_prompt.extend([error_result_item] * (num_completions - len(detailed_results_for_prompt)))
-    return detailed_results_for_prompt
+# calculate_enhanced_rewards_for_single_prompt - MOVED to grpo_project.rewards.calculator.RewardCalculator._calculate_single_reward
 
 # Custom callback for curriculum learning progression (defined at module level)
-class CurriculumProgressCallback(TrainerCallback):
-    def __init__(self, curriculum_manager, trainer_ref, output_dir):
-        self.curriculum_manager = curriculum_manager
-        self.trainer_ref = trainer_ref
+# class CurriculumProgressCallback(TrainerCallback): # MOVED to grpo_project.curriculum.callbacks
+#     def __init__(self, curriculum_manager, trainer_ref, output_dir):
+#         self.curriculum_manager = curriculum_manager
+#         self.trainer_ref = trainer_ref
         self.performance_history = []
         self.output_dir = output_dir
         self.debug_log_path = os.path.join(output_dir, "curriculum_debug.txt")
@@ -883,22 +538,22 @@ class CurriculumProgressCallback(TrainerCallback):
                  stage_name_for_local_log = self.curriculum_manager.curriculum_stages[current_stage_idx_for_local_log].name
 
             self._write_debug(f"Step {current_step}: Currently in curriculum stage {current_stage_idx_for_local_log} ('{stage_name_for_local_log}'). Dataset size: {len(self.curriculum_manager.get_current_stage_dataset())}")
-            self.last_locally_logged_stage_idx = current_stage_idx_for_local_log
+            # self.last_locally_logged_stage_idx = current_stage_idx_for_local_log
 
 
 # 3. 优化的课程学习回调
-class OptimizedCurriculumCallback(DefaultFlowCallback):
-    """优化的课程学习回调，包含动态难度调整"""
+# class OptimizedCurriculumCallback(DefaultFlowCallback): # MOVED to grpo_project.curriculum.callbacks
+#     """优化的课程学习回调，包含动态难度调整"""
     
-    def __init__(self, curriculum_manager, trainer_ref, output_dir):
+#     def __init__(self, curriculum_manager, trainer_ref, output_dir):
         super().__init__()
         self.curriculum_manager = curriculum_manager
         self.trainer_ref = trainer_ref
-        self.output_dir = output_dir
-        self.difficulty_adjuster = DynamicDifficultyAdjuster(curriculum_manager)
-        self.performance_history = []
+        # self.output_dir = output_dir
+        # self.difficulty_adjuster = DynamicDifficultyAdjuster(curriculum_manager) # DynamicDifficultyAdjuster is not defined here
+        # self.performance_history = []
         
-    def on_log(self, args, state, control, logs=None, **kwargs):
+    # def on_log(self, args, state, control, logs=None, **kwargs):
         """在每次日志记录时检查课程进展"""
         if logs is None or not self.curriculum_manager:
             return
@@ -952,7 +607,7 @@ class OptimizedCurriculumCallback(DefaultFlowCallback):
             with open(state_file, 'w', encoding='utf-8') as f:
                 json.dump(state_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            logger.warning(f"保存课程状态失败: {e}")
+            # logger.warning(f"保存课程状态失败: {e}")
 # 🔧 额外的调试信息函数
 def debug_checkpoint_contents(checkpoint_path):
     """调试checkpoint内容"""
@@ -994,114 +649,76 @@ class PeriodicStatusReporter:
     def __init__(self, output_dir, report_interval=100):
         self.output_dir = output_dir
         self.report_interval = report_interval
-        self.status_log_path = os.path.join(output_dir, "training_status.txt")
+        # self.status_log_path = os.path.join(output_dir, "training_status.txt") # Definition is in reporting_utils.py
         
-    def report_status(self, step, trainer_state, curriculum_manager=None, experience_buffer=None):
-        """生成定期状态报告"""
-        if step % self.report_interval != 0:
-            return
+    # def report_status(self, step, trainer_state, curriculum_manager=None, experience_buffer=None): # Definition is in reporting_utils.py
+    #     """生成定期状态报告"""
+    #     if step % self.report_interval != 0:
+    #         return
         
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    #     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        status_report = f"""
-========================================
-训练状态报告 - 步数 {step}
-时间: {timestamp}
-========================================
+    #     status_report = f"""
+# ========================================
+# 训练状态报告 - 步数 {step}
+# 时间: {timestamp}
+# ========================================
 
-📈 训练进度:
-  - 当前步数: {step}
-  - 最大步数: {trainer_state.max_steps if trainer_state.max_steps > 0 else '无限制'}
-  - 完成百分比: {(step/trainer_state.max_steps*100) if trainer_state.max_steps > 0 else 'N/A'}%
+# 📈 训练进度:
+#   - 当前步数: {step}
+#   - 最大步数: {trainer_state.max_steps if trainer_state.max_steps > 0 else '无限制'}
+#   - 完成百分比: {(step/trainer_state.max_steps*100) if trainer_state.max_steps > 0 else 'N/A'}%
 
-📚 课程学习状态:"""
+# 📚 课程学习状态:"""
         
-        if curriculum_manager:
-            current_stage = curriculum_manager.current_stage
-            total_stages = len(curriculum_manager.curriculum_stages)
+    #     if curriculum_manager:
+    #         current_stage = curriculum_manager.current_stage
+    #         total_stages = len(curriculum_manager.curriculum_stages)
             
-            status_report += f"""
-  - 当前阶段: {current_stage}/{total_stages-1}
-  - 阶段名称: {curriculum_manager.curriculum_stages[current_stage].name if current_stage < total_stages else 'final'}
-  - 阶段进度: {len(curriculum_manager.stage_performance_history)}次评估
-  - 数据集大小: {len(curriculum_manager.get_current_stage_dataset())}"""
-        else:
-            status_report += "\n  - 课程学习: 未启用"
+    #         status_report += f"""
+#   - 当前阶段: {current_stage}/{total_stages-1}
+#   - 阶段名称: {curriculum_manager.curriculum_stages[current_stage].name if current_stage < total_stages else 'final'}
+#   - 阶段进度: {len(curriculum_manager.stage_performance_history)}次评估
+#   - 数据集大小: {len(curriculum_manager.get_current_stage_dataset())}"""
+    #     else:
+    #         status_report += "\n  - 课程学习: 未启用"
         
-        status_report += f"""
+    #     status_report += f"""
 
-🔄 经验回放状态:"""
+# 🔄 经验回放状态:"""
         
-        if experience_buffer:
-            buffer_stats = experience_buffer.get_stats()
-            status_report += f"""
-  - 缓存大小: {buffer_stats['size']}/{experience_buffer.max_size}
-  - 平均奖励: {buffer_stats['mean_reward']:.2f}
-  - 最高奖励: {buffer_stats['max_reward']:.2f}"""
-        else:
-            status_report += "\n  - 经验回放: 未启用"
+    #     if experience_buffer:
+    #         buffer_stats = experience_buffer.get_stats()
+    #         status_report += f"""
+#   - 缓存大小: {buffer_stats['size']}/{experience_buffer.max_size}
+#   - 平均奖励: {buffer_stats['mean_reward']:.2f}
+#   - 最高奖励: {buffer_stats['max_reward']:.2f}"""
+    #     else:
+    #         status_report += "\n  - 经验回放: 未启用"
         
-        # 最近的损失信息
-        if trainer_state.log_history:
-            recent_loss = trainer_state.log_history[-1].get('loss', 'N/A')
-            status_report += f"""
+    #     # 最近的损失信息
+    #     if trainer_state.log_history:
+    #         recent_loss = trainer_state.log_history[-1].get('loss', 'N/A')
+    #         status_report += f"""
 
-📊 最近指标:
-  - 训练损失: {recent_loss}
-  - 学习率: {trainer_state.log_history[-1].get('learning_rate', 'N/A')}"""
+# 📊 最近指标:
+#   - 训练损失: {recent_loss}
+#   - 学习率: {trainer_state.log_history[-1].get('learning_rate', 'N/A')}"""
         
-        status_report += f"""
+    #     status_report += f"""
 
-========================================
-"""
+# ========================================
+# """
         
-        # 输出到控制台
-        logger.info(status_report)
+    #     # 输出到控制台
+    #     logger.info(status_report)
         
-        # 保存到文件
-        with open(self.status_log_path, 'a') as f:
-            f.write(status_report + "\n")
-class DetailedRewardCallback(TrainerCallback):
-    """详细奖励监控回调"""
-    
-    def __init__(self, output_dir="./output"):
-        self.output_dir = output_dir
-        self.reward_history = []
-        
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        if logs is None:
-            return
-            
-        # 🔧 修复：安全获取global_step
-        current_step = getattr(state, 'global_step', 0) or 0
-        
-        # 记录奖励相关指标
-        reward_metrics = {}
-        for key, value in logs.items():
-            if 'reward' in key.lower() and isinstance(value, (int, float)):
-                reward_metrics[key] = value
-        
-        if reward_metrics:
-            self.reward_history.append({
-                'step': current_step,
-                'metrics': reward_metrics
-            })
-            
-            logger.info(f"🎯 步数 {current_step}: 奖励指标 = {reward_metrics}")
-            
-            # 定期保存奖励历史
-            if current_step % 100 == 0:
-                self._save_reward_history()
-    
-    def _save_reward_history(self):
-        """保存奖励历史"""
-        try:
-            os.makedirs(self.output_dir, exist_ok=True)
-            reward_history_path = os.path.join(self.output_dir, "reward_history.json")
-            with open(reward_history_path, "w", encoding="utf-8") as f:
-                json.dump(self.reward_history, f, indent=2)
-        except Exception as e_save:
-            logger.warning(f"保存奖励历史失败: {e_save}")
+    #     # 保存到文件
+    #     with open(self.status_log_path, 'a') as f:
+    #         f.write(status_report + "\n")
+
+# DetailedRewardCallback class definition was here. It has been moved to grpo_project/callbacks/monitoring.py
+
 def main():
     # 🔧 修复：在函数开始就初始化所有变量，避免UnboundLocalError
     curriculum_manager = None
@@ -1136,16 +753,16 @@ def main():
             callbacks_list.append(reward_callback)
             
             # W&B callback (如果启用)
-            wandb_callback = None
+            wandb_callback_instance = None # Renamed to avoid conflict with outer scope wandb_callback
             # 🔧 修复wandb接续
             if grpo_cfg.local_rank <= 0 and "wandb" in grpo_cfg.report_to:
                 # 设置wandb的恢复参数
                 wandb_resume_mode = "allow"  # 允许恢复
                 wandb_run_id = None
                 
-                if is_resuming:
+                if is_resuming: # is_resuming should be defined in the outer scope of main
                     # 尝试从原始run_name推导wandb run_id
-                    wandb_run_id = sanitized_run_name
+                    wandb_run_id = sanitized_run_name # sanitized_run_name should be defined in the outer scope of main
                     wandb_resume_mode = "allow"  # 尝试恢复，如果失败则创建新的
                     logger.info(f"🔗 尝试恢复wandb run: {wandb_run_id}")
                 
@@ -1154,12 +771,12 @@ def main():
                     os.environ["WANDB_RUN_ID"] = wandb_run_id
                     os.environ["WANDB_RESUME"] = wandb_resume_mode
                 
-                wandb_callback = DetailedWandbCallback(env_cfg, script_cfg, reward_cfg, experience_buffer)
-                callbacks_list.append(wandb_callback)
+                # Use the aliased TrainDetailedWandbCallback
+                wandb_callback_instance = TrainDetailedWandbCallback(env_cfg, script_cfg, reward_cfg, experience_buffer)
+                callbacks_list.append(wandb_callback_instance)
                 logger.info(f"✅ wandb回调已创建 - resume模式: {wandb_resume_mode}")
-
             
-            return callbacks_list, wandb_callback
+            return callbacks_list, wandb_callback_instance # Return the instance
         
         run_specific_name_from_env = os.getenv("WANDB_RUN_NAME")
         if not run_specific_name_from_env:
@@ -1207,25 +824,19 @@ def main():
 
         log_file_path = os.path.join(actual_output_dir, "enhanced_training_log.txt")
         log_handlers = [logging.StreamHandler(sys.stdout)] 
-        if grpo_cfg.local_rank <= 0: 
-            log_mode = "a" 
-            file_handler = logging.FileHandler(log_file_path, mode=log_mode, encoding='utf-8')
-            log_handlers.append(file_handler)
-
-        logging.basicConfig(
-            level=grpo_cfg.get_process_log_level(), 
-            format=f"[RANK {grpo_cfg.local_rank:02d}] %(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s",
-            handlers=log_handlers,
-            force=True, 
+        # Setup logging using the new utility function
+        setup_global_logging(
+            log_level=grpo_cfg.get_process_log_level(),
+            log_file_path=log_file_path,
+            local_rank=grpo_cfg.local_rank
         )
-        global logger 
-        logger = logging.getLogger(__name__)
+        # global logger # logger is now setup globally by setup_global_logging
+        logger = logging.getLogger(__name__) # Get the logger instance for the current file
 
-        # 设置状态报告器
+        # 设置状态报告器 (Now imported from grpo_project.utils)
         status_reporter = PeriodicStatusReporter(script_cfg.output_dir, report_interval=50)
 
-        transformers_logger = logging.getLogger("transformers")
-        transformers_logger.setLevel(logging.WARNING if grpo_cfg.local_rank <=0 else logging.ERROR)
+        # transformers_logger setup is now handled by setup_global_logging
 
         logger.info(f"=== ENHANCED GRPO TRAINING STARTED (PID: {os.getpid()}) ===")
         logger.info(f"Process rank: {grpo_cfg.process_index}, Local rank: {grpo_cfg.local_rank}, Device: {grpo_cfg.device}, N_GPU: {grpo_cfg.n_gpu}, World Size: {grpo_cfg.world_size}")
@@ -1644,10 +1255,14 @@ def main():
             logger.info("🤖 使用Qwen3优化的数据集处理流程...")
             dataset_dir = os.path.dirname(os.path.abspath(script_cfg.dataset_path))
             logger.info(f"Dataset directory: {dataset_dir}")
-            dataset = qwen3_dataset_processing_pipeline(dataset_raw, dataset_dir, script_cfg)
+            # dataset = qwen3_dataset_processing_pipeline(dataset_raw, dataset_dir, script_cfg) # Now use VerilogDataPreprocessor
+            data_preprocessor = VerilogDataPreprocessor(script_cfg_val=script_cfg) # script_cfg_val is script_cfg in this context
+            dataset = data_preprocessor.process_dataset_pipeline(dataset_raw, ds_dir=dataset_dir) # ds_dir is dataset_dir
+
             del dataset_raw; gc.collect()
 
-            dataset = enhance_dataset_with_level_and_complexity(dataset) 
+            # enhance_dataset_with_level_and_complexity is now part of the pipeline in VerilogDataPreprocessor
+            # dataset = enhance_dataset_with_level_and_complexity(dataset)
 
             logger.info(f"Final processed dataset: {len(dataset)} rows. Columns: {dataset.column_names}")
             if len(dataset) > 0 and logger.isEnabledFor(logging.DEBUG):
@@ -1667,9 +1282,10 @@ def main():
         
         # 🔧 修复：确保curriculum_manager在使用前被正确初始化
         try:
-            curriculum_manager = setup_curriculum_manager(script_cfg, dataset)
+            # Use the new setup function from the curriculum module
+            curriculum_manager = setup_fixed_curriculum_manager(script_cfg, dataset)
             if curriculum_manager:
-                logger.info(f"✅ 课程学习已启用")
+                logger.info(f"✅ 课程学习已启用 using curriculum manager: {type(curriculum_manager).__name__}")
                 logger.info(f"📊 当前阶段: {curriculum_manager.current_stage}")
                 logger.info(f"📊 总阶段数: {len(curriculum_manager.curriculum_stages)}")
                 
@@ -1788,215 +1404,38 @@ def main():
     
             # --- 从 kwargs 中获取必要的上下文对象 ---
             # 假设这些键名与 reward_func_with_context 中添加到 kwargs_reward 的键名一致
-            current_reward_cfg: Optional[EnhancedRewardConfig] = kwargs.get('reward_config_obj')
-            current_script_cfg: Optional[ScriptConfig] = kwargs.get('script_config_obj')
-            current_experience_buffer: Optional[ExperienceBuffer] = kwargs.get('experience_buffer_obj')
+            # current_reward_cfg, current_script_cfg, current_experience_buffer, etc. are passed via closure or kwargs
+            # Instantiate RewardCalculator (simulator can be None for now, or a basic version if available)
+            # Note: reward_cfg would be available in the outer scope of main()
+            reward_calculator_instance = RewardCalculator(reward_config=kwargs.get('reward_config_obj'), simulator=None)
+
+            # Call the batch reward calculation method
+            # The necessary arguments (prompts, completions, etc.) are in kwargs_reward from GRPOTrainer
+            # Ensure that the keys used here match what GRPOTrainer provides in kwargs_reward
+            # GRPOTrainer typically passes columns of the dataset as keyword arguments.
+            # The 'prompts' and 'completions' are standard. Others like 'testbench_path' need to be in the dataset.
             
-            training_step: int = kwargs.get('training_step', 0)
-            wandb_cb_from_kwargs: Optional[DetailedWandbCallback] = kwargs.get('wandb_callback', None)
-            output_dir_for_debug_val: Optional[str] = kwargs.get('output_dir', None)
-
-            # --- 对关键配置对象进行有效性检查 ---
-            if current_reward_cfg is None:
-                logger.critical("EnhancedBatchRewardCalculator: 'reward_config_obj' 未在kwargs中提供! 奖励计算将使用默认惩罚值。")
-                # 在没有有效 reward_cfg 的情况下，很难计算有意义的奖励，可以返回一个固定的惩罚值
-                # 或者，如果 reward_cfg 在全局作用域中定义（不推荐），可以尝试回退：
-                # global reward_cfg # 声明使用全局变量
-                # current_reward_cfg = reward_cfg
-                # 这里我们选择返回固定惩罚，因为依赖全局变量是不好的实践
-                return [-10.0] * num_items_in_batch, {} # Return empty dict for metrics
-
-            if current_script_cfg is None:
-                logger.warning("EnhancedBatchRewardCalculator: 'script_config_obj' 未在kwargs中提供。某些功能（如经验回放的启用判断）可能受影响。")
-                # 如果 script_cfg 对核心奖励逻辑不是绝对必要，可以继续；否则也应该处理错误
-
-            # --- 检查输入列表长度是否一致 ---
-            expected_lengths = {
-                "prompts": len(prompts), "completions": len(completions), "testbench_path": len(testbench_path),
-                "expected_total_tests": len(expected_total_tests), "reference_verilog_path": len(reference_verilog_path),
-            }
-            if original_enhanced_prompt is not None:
-                expected_lengths["original_enhanced_prompt"] = len(original_enhanced_prompt)
-            else: # 如果 original_enhanced_prompt 未提供，这是一个严重问题
-                logger.error("EnhancedBatchRewardCalculator: 'original_enhanced_prompt' is None! "
-                            "Reward calculation might be inaccurate as it relies on unwrapped prompts for parsing.")
-                # 根据您的策略，这里可以选择返回惩罚，或者在下面循环中处理
-
-            if len(set(expected_lengths.values())) > 1:
-                mismatched_lengths_str = ", ".join([f"{k}:{v}" for k, v in expected_lengths.items()])
-                logger.error(
-                    f"Enhanced batch reward calculator: Mismatch in input list lengths. Details: {mismatched_lengths_str}"
-                )
-                return [current_reward_cfg.get_scaled_reward(current_reward_cfg.compilation_failure * 3, training_step)] * len(completions), {}
-
-            if num_items_in_batch == 0:
-                logger.warning("Enhanced batch reward calculator: Received an empty batch.")
-                return [], {}
-
-            for i in range(num_items_in_batch):
-                qwen_formatted_prompt_for_buffer = prompts[i] # 模型实际看到的输入
-                current_completion_str = completions[i] # Renamed for clarity
-                current_tb = testbench_path[i]
-                current_ett = expected_total_tests[i]
-                current_ref_v = reference_verilog_path[i]
-
-                # 获取用于奖励计算的、未经Qwen包装的增强后提示
-                prompt_for_reward_calculation = ""
-                if original_enhanced_prompt and i < len(original_enhanced_prompt) and \
-                isinstance(original_enhanced_prompt[i], str) and original_enhanced_prompt[i].strip():
-                    prompt_for_reward_calculation = original_enhanced_prompt[i]
-                else:
-                    logger.warning(
-                        f"Item {i}: 'original_enhanced_prompt' not available, invalid, or empty. "
-                        f"Using Qwen-formatted prompt ('{qwen_formatted_prompt_for_buffer[:70]}...') for reward calculation. "
-                        f"This might lead to parsing issues in calculate_enhanced_rewards_for_single_prompt."
-                    )
-                    # 回退：使用Qwen格式化后的提示，但这可能导致 calculate_enhanced_rewards_for_single_prompt 内部解析错误
-                    prompt_for_reward_calculation = qwen_formatted_prompt_for_buffer
-                    # 从Qwen格式中尝试提取 user 部分内容，作为近似的“原始增强后提示”
-                    match_user_content = re.search(r"<\|im_start\|>user\n(.*?)\n?<\|im_end\|>", qwen_formatted_prompt_for_buffer, re.DOTALL)
-                    if match_user_content:
-                        prompt_for_reward_calculation = match_user_content.group(1).strip()
-                        logger.debug(f"Item {i}: Extracted user content from Qwen prompt for reward calculation.")
-                    else:
-                        logger.warning(f"Item {i}: Could not extract user content from Qwen prompt. Reward parsing may fail.")
-
-                # calculate_enhanced_rewards_for_single_prompt now returns a list of dicts
-                # Since we pass only one completion, we take the first element.
-                results_list_for_item = calculate_enhanced_rewards_for_single_prompt(
-                    prompt_str=prompt_for_reward_calculation,
-                    completions_for_this_prompt=[current_completion_str], # Pass as a list
-                    current_tb_path=current_tb,
-                    current_expected_total_from_manifest=current_ett,
-                    current_ref_verilog_path=current_ref_v,
-                    reward_config=current_reward_cfg,
-                    training_step=training_step,
-                    wandb_callback=wandb_cb_from_kwargs, # This callback is for per-completion details if still needed
-                    output_dir_for_debug=output_dir_for_debug_val
-                )
-                
-                item_detailed_result = {}
-                if results_list_for_item:
-                    item_detailed_result = results_list_for_item[0]
-                else: # Should not happen if calculate_enhanced_rewards_for_single_prompt is robust
-                    logger.error(f"calculate_enhanced_rewards_for_single_prompt returned empty list for item {i}. Assigning penalty.")
-                    error_reward_val = current_reward_cfg.get_scaled_reward(current_reward_cfg.compilation_failure * 3, training_step)
-                    item_detailed_result = {
-                        "final_reward": error_reward_val,
-                        "unscaled_components": {"functional": 0.0, "efficiency": 0.0, "readability": 0.0, "robustness": 0.0, "base_compilation": current_reward_cfg.compilation_failure * 3},
-                        "funnel_metrics": {"code_extracted": False, "compiled_successfully": False, "sim_ran_successfully": False, "passed_tests": -1}
-                    }
-                
-                batch_rewards_final_scaled.append(item_detailed_result["final_reward"])
-                batch_all_unscaled_components.append(item_detailed_result["unscaled_components"])
-                batch_all_funnel_metrics.append(item_detailed_result["funnel_metrics"])
-                
-                if current_experience_buffer and current_script_cfg and current_script_cfg.enable_experience_replay:
-                    try:
-                        current_experience_buffer.add_experience(
-                            prompt=qwen_formatted_prompt_for_buffer,
-                            completion=current_completion_str,
-                            reward=item_detailed_result["final_reward"],
-                            metadata={
-                                "training_step": training_step, 
-                                "testbench": current_tb, 
-                                "original_enhanced_prompt_preview": prompt_for_reward_calculation[:100]
-                            }
-                        )
-                    except Exception as e_exp:
-                        logger.warning(f"Failed to add experience to buffer for item {i}: {e_exp}", exc_info=True)
+            # These are the expected keys from the dataset that GRPOTrainer will pass in kwargs_reward
+            # (as per the original calculate_enhanced_rewards_for_single_prompt and its usage context)
+            # The GRPOTrainer will pass columns of the dataset by their names.
+            # We need to ensure the dataset used by GRPOTrainer has these columns.
+            # The `enhanced_batch_reward_calculator` is called by `reward_func_with_context`
+            # which receives dataset columns in `kwargs_reward`.
             
+            # The keys in `kwargs_reward` are directly from the dataset columns.
+            # The `RewardCalculator.calculate_batch_rewards` expects specific argument names.
+            # We need to map them correctly.
             
-            # 🔧 创建稳定化的奖励计算器
-
-            # --- Aggregate metrics for the batch ---
-            aggregated_metrics_for_wandb = {}
-            if num_items_in_batch > 0:
-                # 1. Unscaled Reward Components (Mean and Std)
-                component_keys = ["functional", "efficiency", "readability", "robustness", "base_compilation"]
-                for key in component_keys:
-                    values = [comp[key] for comp in batch_all_unscaled_components if key in comp]
-                    if values:
-                        aggregated_metrics_for_wandb[f"reward_components/unscaled_{key}_mean"] = np.mean(values)
-                        aggregated_metrics_for_wandb[f"reward_components/unscaled_{key}_std"] = np.std(values)
-
-                # 2. Code Generation Funnel Metrics
-                total_completions_in_batch = num_items_in_batch
-
-                successful_extractions = sum(1 for fm in batch_all_funnel_metrics if fm["code_extracted"])
-                successful_compilations = sum(1 for fm in batch_all_funnel_metrics if fm["compiled_successfully"]) # Assumes compiled_successfully=True implies code_extracted=True
-                simulation_runs = sum(1 for fm in batch_all_funnel_metrics if fm["sim_ran_successfully"]) # Assumes sim_ran_successfully=True implies compiled_successfully=True
-
-                aggregated_metrics_for_wandb["generation_funnel/successful_extractions_count"] = successful_extractions
-                aggregated_metrics_for_wandb["generation_funnel/successful_extractions_ratio"] = successful_extractions / total_completions_in_batch if total_completions_in_batch > 0 else 0
-
-                aggregated_metrics_for_wandb["generation_funnel/successful_compilations_count"] = successful_compilations
-                # Ratio based on successfully extracted code for more meaningful funnel
-                aggregated_metrics_for_wandb["generation_funnel/successful_compilations_ratio"] = successful_compilations / successful_extractions if successful_extractions > 0 else 0
-
-                aggregated_metrics_for_wandb["generation_funnel/simulation_runs_count"] = simulation_runs
-                # Ratio based on successfully compiled code
-                aggregated_metrics_for_wandb["generation_funnel/simulation_runs_ratio"] = simulation_runs / successful_compilations if successful_compilations > 0 else 0
-
-                passed_tests_values = [fm["passed_tests"] for fm in batch_all_funnel_metrics if fm["sim_ran_successfully"] and fm["passed_tests"] != -1]
-                if passed_tests_values:
-                    aggregated_metrics_for_wandb["generation_funnel/avg_passed_tests_on_success_runs"] = np.mean(passed_tests_values)
-                else:
-                    aggregated_metrics_for_wandb["generation_funnel/avg_passed_tests_on_success_runs"] = 0
-
-            # Return both the list of final scaled rewards for GRPOTrainer and the aggregated metrics for W&B
-            # 每10步输出详细统计
-            if batch_rewards_final_scaled and training_step % 10 == 0:  # 每10步监控一次
-                # 计算奖励统计
-                reward_stats = {
-                    'mean': np.mean(batch_rewards_final_scaled),
-                    'std': np.std(batch_rewards_final_scaled),
-                    'min': np.min(batch_rewards_final_scaled),
-                    'max': np.max(batch_rewards_final_scaled),
-                    'median': np.median(batch_rewards_final_scaled)
-                }
-                
-                # 计算成功率统计
-                positive_rewards = [r for r in batch_rewards_final_scaled if r > 0]
-                success_rate = len(positive_rewards) / len(batch_rewards_final_scaled) if batch_rewards_final_scaled else 0
-                
-                # 分析奖励分布
-                high_rewards = [r for r in batch_rewards_final_scaled if r > reward_stats['mean'] + reward_stats['std']]
-                low_rewards = [r for r in batch_rewards_final_scaled if r < reward_stats['mean'] - reward_stats['std']]
-                
-                logger.info(f"""
-                📊 步数 {training_step} 奖励深度分析:
-                ├─ 基础统计:
-                │  ├─ 平均奖励: {reward_stats['mean']:.4f}
-                │  ├─ 标准差: {reward_stats['std']:.4f}
-                │  ├─ 中位数: {reward_stats['median']:.4f}
-                │  └─ 范围: [{reward_stats['min']:.4f}, {reward_stats['max']:.4f}]
-                ├─ 成功分析:
-                │  ├─ 正奖励率: {success_rate:.2%} ({len(positive_rewards)}/{len(batch_rewards_final_scaled)})
-                │  ├─ 高奖励数: {len(high_rewards)} (>{reward_stats['mean']+reward_stats['std']:.3f})
-                │  └─ 低奖励数: {len(low_rewards)} (<{reward_stats['mean']-reward_stats['std']:.3f})
-                └─ 批次信息: {len(batch_rewards_final_scaled)} 个样本
-                """)
-                
-                # 如果有经验缓冲区，记录统计信息
-                if current_experience_buffer:
-                    try:
-                        buffer_stats = current_experience_buffer.get_stats()
-                        logger.info(f"📚 经验缓冲区: {buffer_stats.get('size', 0)} 条经验")
-                    except Exception as e_buffer:
-                        logger.debug(f"无法获取经验缓冲区统计: {e_buffer}")
-            
-            # 每50步进行更深入的分析
-            if training_step % 50 == 0 and training_step > 0:
-                logger.info(f"""
-                🎯 步数 {training_step} 训练里程碑:
-                ├─ 当前批次平均奖励: {np.mean(batch_rewards_final_scaled):.4f}
-                ├─ 奖励稳定性: {'稳定' if np.std(batch_rewards_final_scaled) < 2.0 else '波动较大'}
-                ├─ 建议: {'继续当前策略' if np.mean(batch_rewards_final_scaled) > 0 else '考虑调整策略'}
-                └─ 预计完成进度: {training_step}/{current_script_cfg.max_steps if current_script_cfg else '未知'} ({training_step/(current_script_cfg.max_steps if current_script_cfg and current_script_cfg.max_steps > 0 else 300)*100:.1f}%)
-                """)
-            
-            return batch_rewards_final_scaled, aggregated_metrics_for_wandb
+            return reward_calculator_instance.calculate_batch_rewards(
+                prompts=kwargs_reward.get('prompt', []), # GRPOTrainer passes the 'prompt' column values
+                completions=completions, # This `completions` is directly passed to `enhanced_batch_reward_calculator`
+                testbench_paths=kwargs_reward.get('testbench_path', []),
+                expected_total_tests_list=kwargs_reward.get('expected_total_tests', []),
+                reference_verilog_paths=kwargs_reward.get('reference_verilog_path', []),
+                original_enhanced_prompts=kwargs_reward.get('original_enhanced_prompt', None), # This should be in dataset
+                training_step=kwargs.get('training_step', 0),
+                output_dir_for_debug=kwargs.get('output_dir', None)
+            )
         
         def reward_func_with_context(*args_reward, **kwargs_reward):
             # 这些变量需要在 reward_func_with_context 被 GRPOTrainer 调用时，
