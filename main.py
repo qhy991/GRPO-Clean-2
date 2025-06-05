@@ -6,7 +6,7 @@ import gc
 import sys
 from dataclasses import asdict
 import json # For logging configs
-
+from typing import Dict, Any, Optional, List
 # --- BEGIN: PyTorch Safe Unpickling Configuration ---
 logger_temp = logging.getLogger(__name__ + "_startup")
 try:
@@ -312,7 +312,6 @@ class GRPOTrainingPipeline:
             model=self.model,
             args=self.grpo_cfg,
             train_dataset=dataset_for_trainer,
-            tokenizer=self.tokenizer,
             reward_funcs=[self.get_reward_function()],
             callbacks=self.callbacks
         )

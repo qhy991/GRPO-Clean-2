@@ -8,7 +8,7 @@ from transformers import (
     GenerationConfig, # Added for Qwen3CompatibilityFixer potentially
 )
 from peft import get_peft_model, LoraConfig, TaskType, PeftModel, prepare_model_for_kbit_training
-
+from typing import Optional, Any, Dict, List
 # Assuming these config classes are passed in or accessible
 # from grpo_project.configs import ScriptConfig, TrainingConfig (GRPOConfig)
 # from grpo_project.utils.model_utils import Qwen3CompatibilityFixer # Or wherever it is

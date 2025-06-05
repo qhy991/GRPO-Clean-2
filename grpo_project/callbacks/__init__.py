@@ -8,7 +8,7 @@ from .monitoring import (
     DetailedRewardCallback,
     RewardStabilityMonitor
 )
-from .wandb_callbacks import DetailedWandbCallback, GenericWandbCallback
+from .wandb import DetailedWandbCallback, GenericWandbCallback
 # Note: DetailedWandbCallback here will be the one from wandb.py (originally from train.py)
 # GenericWandbCallback is the one originally from utils.py
 from .persistence import CustomStatePersistenceCallback

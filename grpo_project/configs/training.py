@@ -64,20 +64,10 @@ class ScriptConfig:
     experience_buffer_size: int = field(default=1000, metadata={"help": "Size of experience replay buffer."})
     replay_sample_ratio: float = field(default=0.2, metadata={"help": "Ratio of replay samples in each batch."})
 
-    # --- Field initialized in __post_init__ ---
-    # output_dir will now be set by the TrainingOrchestrator using EnvConfig.output_dir_base and run-specific name.
-    # So, it's removed as a field from here, or TrainingOrchestrator will set it directly.
-    # For now, removing its dynamic creation logic from this __post_init__.
-    # The TrainingOrchestrator will be responsible for self.script_cfg.output_dir = self.actual_output_dir
-
     def __post_init__(self):
-        # The output_dir logic based on output_dir_base is removed.
-        # TrainingOrchestrator will determine and set script_cfg.output_dir.
-
-        # Cache dir logic is also removed as it's now in EnvConfig.
-        # If there are other initializations for ScriptConfig, they would remain here.
-        pass # Keep pass if no other post-initialization logic remains
-
+        # Note: output_dir is handled by GRPOConfig (TrainingArguments)
+        # We'll access it via grpo_cfg.output_dir in the pipeline
+        pass
 @dataclass
 class OptimizedTrainingConfig:
     """优化的训练配置"""

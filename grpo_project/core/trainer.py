@@ -12,7 +12,7 @@ from collections import deque
 import sys
 import math
 from datetime import datetime
-
+from grpo_project.data.dataset import load_and_prepare_dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
