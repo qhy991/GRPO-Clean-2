@@ -1,0 +1,51 @@
+# 屏蔽所有的模型文件
+*.pt
+*.pth
+*.h5
+*.onnx
+*.pb
+*.pkl
+*.bin
+*.ckpt
+*.tflite
+*.v
+*.safetensors
+*.model
+*.txt
+*.txt
+
+# 屏蔽所有的CSV、JSONL文件
+*.csv
+*.jsonl
+*.vcd
+# 屏蔽一些文件夹
+# 示例：假设你要屏蔽 training_logs, checkpoints, output_data 这些文件夹
+training_logs/
+checkpoints/
+output_data/
+trainer_output/
+grpo_runs_wandb/
+grpo_runs_*/
+wandb/
+data/
+Qwen3*/
+merged/
+QWEN3*/
+dataset/
+enhanced_grpo_v*_runs/
+enhanced_grpo_v*_runs-*/
+.enhanced_cache_v*/
+generated_test_outputs_qwen_format/
+
+# 你可能还需要屏蔽一些其他常见的构建、缓存或虚拟环境文件夹
+# 例如：
+venv/
+.env/
+__pycache__/
+.ipynb_checkpoints/
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+.DS_Store # macOS 系统文件
+Thumbs.db # Windows 系统文件
