@@ -425,7 +425,7 @@ CMD_ARGS="${CMD_ARGS} --cache_dir \"${CACHE_DIR_BASE}/models\""
 
 # --- Enhanced Training Execution ---
 LAUNCHER=""
-PYTHON_SCRIPT_TO_RUN="${SCRIPT_DIR}/train.py"
+PYTHON_SCRIPT_TO_RUN="${SCRIPT_DIR}/main.py" # Updated to use main.py
 
 if [ ${NUM_GPUS_PER_NODE} -gt 1 ] || [ "$FSDP_ENABLED" = true ]; then
   LAUNCHER="torchrun \

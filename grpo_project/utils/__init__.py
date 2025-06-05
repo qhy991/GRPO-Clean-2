@@ -4,8 +4,9 @@ from .verilog_utils import validate_verilog_code, assess_code_quality, assess_de
 from .simulation import run_iverilog_simulation, parse_simulation_results_from_output
 from .prompt_utils import wrap_prompt_for_qwen3, enhance_prompt_func
 from .model_utils import setup_qwen3_generation_config
-from .logging_utils import setup_global_logging
-from .reporting_utils import PeriodicStatusReporter, debug_checkpoint_contents
+from .logging import setup_global_logging # Corrected path from previous step
+from .reporting_utils import PeriodicStatusReporter, debug_checkpoint_contents, AdvancedPerformanceMonitor, create_performance_monitor, monitor_advanced_stage_training
+from .replay_buffer import ExperienceBuffer # Added import
 
 # Export constants from parsing
 from .parsing import THINK_START, THINK_END, CODE_BLOCK_START, CODE_BLOCK_END
@@ -26,9 +27,13 @@ __all__ = [
     "wrap_prompt_for_qwen3",
     "enhance_prompt_func",
     "setup_qwen3_generation_config",
-    "setup_global_logging",
+    "setup_global_logging", # From .logging
     "PeriodicStatusReporter",
     "debug_checkpoint_contents",
+    "AdvancedPerformanceMonitor", # Added
+    "create_performance_monitor", # Added
+    "monitor_advanced_stage_training", # Added
+    "ExperienceBuffer", # Added
     "THINK_START",
     "THINK_END",
     "CODE_BLOCK_START",

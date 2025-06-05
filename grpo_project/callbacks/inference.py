@@ -17,7 +17,7 @@ try:
     from grpo_project.utils.verilog_utils import assess_code_quality
     from grpo_project.evaluation.simulator import VerilogSimulator # DetailedInferenceCallback uses run_iverilog_simulation
     # ExperienceBuffer is currently in utils.py, will be moved later. For now, import from utils.
-    from utils import ExperienceBuffer
+    from grpo_project.utils import ExperienceBuffer # Updated import
 except ImportError:
     logger_init = logging.getLogger(__name__)
     logger_init.warning("Callbacks.inference: Could not import from grpo_project or utils. Using placeholders.")

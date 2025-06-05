@@ -22,15 +22,13 @@ from datetime import datetime
 # 获取logger
 logger = logging.getLogger(__name__)
 
-# 导入必要的工具函数（需要确保这些在utils.py中存在）
+# 导入必要的工具函数
 try:
-    from utils import (
-        validate_and_update_dataset_paths,
-        enhance_prompt_func,
-        assess_code_quality
-    )
+    from grpo_project.utils.file_ops import validate_and_update_dataset_paths
+    from grpo_project.utils.prompt_utils import enhance_prompt_func
+    from grpo_project.utils.verilog_utils import assess_code_quality
 except ImportError:
-    logger.warning("某些utils函数导入失败，将使用简化版本")
+    logger.warning("某些grpo_project.utils函数导入失败，将使用简化版本")
     
     # 简化版本的函数
     def validate_and_update_dataset_paths(dataset, dataset_base_path=None):

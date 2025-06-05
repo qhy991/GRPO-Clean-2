@@ -12,10 +12,10 @@ try:
     # For the DetailedWandbCallback from train.py, it needs EnvConfig, ScriptConfig, RewardConfig
     from grpo_project.configs import EnvConfig, ScriptConfig, EnhancedRewardConfig as RewardConfig
     # For GenericWandbCallback (from utils.py), it needs ExperienceBuffer
-    from utils import ExperienceBuffer # Assuming ExperienceBuffer is still in utils.py for now
+    from grpo_project.utils import ExperienceBuffer # Updated import
 except ImportError:
     logger_init = logging.getLogger(__name__)
-    logger_init.warning("Callbacks.wandb_callbacks: Could not import from grpo_project or utils. Using placeholders.")
+    logger_init.warning("Callbacks.wandb: Could not import from grpo_project or utils. Using placeholders.") # Updated path in log
     from transformers import TrainerCallback as BaseCallback # Fallback
     class EnvConfig: pass
     class ScriptConfig: pass

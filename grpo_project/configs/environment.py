@@ -22,23 +22,48 @@ class EnvConfig:
 
     _generated_wandb_run_name: Optional[str] = field(init=False, repr=False, default=None)
 
+    # Paths formerly in ScriptConfig
+    dataset_base_path: Optional[str] = field(default=None, metadata={"help": "Absolute base path for the dataset. If provided, relative paths in the dataset manifest for 'testbench_path' and 'reference_verilog_path' will be resolved against this."})
+    output_dir_base: str = field(default="grpo_verilog_runs_enhanced", metadata={"help": "Base directory for all outputs. A timestamped or run-name specific subdirectory will be created here."})
+    cache_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "Directory to cache downloaded models and datasets. If None, Hugging Face defaults will be used."}
+    )
+
     def __post_init__(self):
-        print("INFO: Initializing EnvConfig and setting environment variables...")
+        # Use a basic print or pre-configured logger if available for __post_init__ messages
+        # as full logging might not be set up when this is instantiated.
+        print_fn = logging.info if logging.getLogger().hasHandlers() else print
+
+        print_fn("INFO: Initializing EnvConfig and setting environment variables...")
         if self.hf_endpoint:
             os.environ['HF_ENDPOINT'] = self.hf_endpoint
-            print(f"INFO: Set HF_ENDPOINT to {self.hf_endpoint}")
+            print_fn(f"INFO: Set HF_ENDPOINT to {self.hf_endpoint}")
         if self.http_proxy:
             os.environ['http_proxy'] = self.http_proxy
-            print(f"INFO: Set http_proxy to {self.http_proxy}")
+            print_fn(f"INFO: Set http_proxy to {self.http_proxy}")
         if self.https_proxy:
             os.environ['https_proxy'] = self.https_proxy
-            print(f"INFO: Set https_proxy to {self.https_proxy}")
+            print_fn(f"INFO: Set https_proxy to {self.https_proxy}")
 
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID" # Standard hardware setting
+
+        # Cache directory setup (moved from ScriptConfig)
+        if self.cache_dir:
+            os.environ['HF_HOME'] = self.cache_dir
+            os.environ['TRANSFORMERS_CACHE'] = self.cache_dir
+            datasets_cache_dir = os.path.join(self.cache_dir, 'datasets')
+            os.environ['HF_DATASETS_CACHE'] = datasets_cache_dir
+            os.makedirs(datasets_cache_dir, exist_ok=True)
+            print_fn(f"INFO: HF_HOME and TRANSFORMERS_CACHE set to: {self.cache_dir}")
+            print_fn(f"INFO: HF_DATASETS_CACHE set to: {datasets_cache_dir}")
+        else:
+            print_fn("INFO: Using default Hugging Face cache locations.")
+
 
         if self.wandb_disable:
             os.environ['WANDB_DISABLED'] = "true"
-            print("INFO: W&B logging explicitly disabled via EnvConfig (WANDB_DISABLED=true).")
+            print_fn("INFO: W&B logging explicitly disabled via EnvConfig (WANDB_DISABLED=true).")
         else:
             if self.wandb_project:
                 os.environ['WANDB_PROJECT'] = self.wandb_project
@@ -52,9 +77,10 @@ class EnvConfig:
                 if not os.getenv('WANDB_RUN_NAME'):
                     os.environ['WANDB_RUN_NAME'] = self._generated_wandb_run_name
 
-        print(f"INFO: Effective W&B Environment:")
-        print(f"  WANDB_PROJECT: {os.getenv('WANDB_PROJECT')}")
-        print(f"  WANDB_ENTITY: {os.getenv('WANDB_ENTITY')}")
-        print(f"  WANDB_RUN_NAME: {os.getenv('WANDB_RUN_NAME')}")
-        print(f"  WANDB_DISABLED: {os.getenv('WANDB_DISABLED')}")
-        print(f"  WANDB_API_KEY is SET: {'YES' if os.getenv('WANDB_API_KEY') else 'NO (relies on login/config)'}")
+        print_fn = logging.info if logging.getLogger().hasHandlers() else print
+        print_fn(f"INFO: Effective W&B Environment:")
+        print_fn(f"  WANDB_PROJECT: {os.getenv('WANDB_PROJECT')}")
+        print_fn(f"  WANDB_ENTITY: {os.getenv('WANDB_ENTITY')}")
+        print_fn(f"  WANDB_RUN_NAME: {os.getenv('WANDB_RUN_NAME')}")
+        print_fn(f"  WANDB_DISABLED: {os.getenv('WANDB_DISABLED')}")
+        print_fn(f"  WANDB_API_KEY is SET: {'YES' if os.getenv('WANDB_API_KEY') else 'NO (relies on login/config)'}")

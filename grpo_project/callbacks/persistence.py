@@ -12,10 +12,9 @@ try:
     from grpo_project.configs import ScriptConfig
     # Assuming EnhancedCurriculumManager and ExperienceBuffer might be defined elsewhere or passed as Any
     # If they are also part of grpo_project, their paths would be like:
-    # from grpo_project.curriculum import EnhancedCurriculumManager
+    from grpo_project.curriculum.manager import EnhancedCurriculumManager # Corrected import
     # from grpo_project.data import ExperienceBuffer (or wherever it ends up)
-    from utils import ExperienceBuffer # Assuming ExperienceBuffer is still in utils.py for now
-    from enhanced_curriculum import EnhancedCurriculumManager # Assuming this is importable from top-level for now
+    from grpo_project.utils import ExperienceBuffer # Updated import
 except ImportError:
     logger_init = logging.getLogger(__name__)
     logger_init.warning("Callbacks.persistence: Could not import from grpo_project. Using placeholders.")

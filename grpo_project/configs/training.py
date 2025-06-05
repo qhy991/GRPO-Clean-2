@@ -15,16 +15,10 @@ class ScriptConfig:
     # --- Fields WITH default values ---
     # curriculum_stages is now Optional and has a default, so it belongs in this section.
     curriculum_stages: Optional[List[Dict[str, Any]]] = field(default=None, metadata={"help": "Detailed dual-layer curriculum stages configuration. Populated dynamically by the script if not provided."})
-    dataset_base_path: Optional[str] = field(default=None, metadata={"help": "Absolute base path for the dataset. If provided, relative paths in the dataset manifest for 'testbench_path' and 'reference_verilog_path' will be resolved against this."})
+    # dataset_base_path, output_dir_base, cache_dir moved to EnvConfig
     stage1_adapter_path: Optional[str] = field(
         default=None,
         metadata={"help": "Path to the LoRA adapters from the first stage of training. If provided, these will be loaded and training will continue on them."}
-    )
-    output_dir_base: str = field(default="grpo_verilog_runs_enhanced", metadata={"help": "Base directory for all outputs. A timestamped subdirectory will be created here."})
-
-    cache_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "Directory to cache downloaded models and datasets. If None, Hugging Face defaults will be used."}
     )
 
     # Enhanced LoRA config
@@ -67,26 +61,18 @@ class ScriptConfig:
     replay_sample_ratio: float = field(default=0.2, metadata={"help": "Ratio of replay samples in each batch."})
 
     # --- Field initialized in __post_init__ ---
-    output_dir: str = field(init=False, metadata={"help": "Full path to the output directory for this run (dynamically created)."})
+    # output_dir will now be set by the TrainingOrchestrator using EnvConfig.output_dir_base and run-specific name.
+    # So, it's removed as a field from here, or TrainingOrchestrator will set it directly.
+    # For now, removing its dynamic creation logic from this __post_init__.
+    # The TrainingOrchestrator will be responsible for self.script_cfg.output_dir = self.actual_output_dir
 
     def __post_init__(self):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_model_name_parts = []
-        if self.model_name_or_path:
-            safe_model_name_parts.append(self.model_name_or_path.split('/')[-1])
-        if self.stage1_adapter_path:
-             safe_model_name_parts.append("s1adapted")
+        # The output_dir logic based on output_dir_base is removed.
+        # TrainingOrchestrator will determine and set script_cfg.output_dir.
 
-        safe_model_name = "_".join(safe_model_name_parts) if safe_model_name_parts else "unknown_model"
-        self.output_dir = os.path.join(self.output_dir_base, f"enhanced_grpo_{safe_model_name}_{timestamp}")
-
-        if self.cache_dir:
-            os.environ['HF_HOME'] = self.cache_dir
-            os.environ['TRANSFORMERS_CACHE'] = self.cache_dir
-            os.environ['HF_DATASETS_CACHE'] = os.path.join(self.cache_dir, 'datasets')
-            os.makedirs(os.environ['HF_DATASETS_CACHE'], exist_ok=True)
-            print(f"INFO: HF_HOME and TRANSFORMERS_CACHE set to: {self.cache_dir}")
-            print(f"INFO: HF_DATASETS_CACHE set to: {os.environ['HF_DATASETS_CACHE']}")
+        # Cache dir logic is also removed as it's now in EnvConfig.
+        # If there are other initializations for ScriptConfig, they would remain here.
+        pass # Keep pass if no other post-initialization logic remains
 
 @dataclass
 class OptimizedTrainingConfig:

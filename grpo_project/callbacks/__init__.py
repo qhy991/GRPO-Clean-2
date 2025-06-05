@@ -9,7 +9,7 @@ from .monitoring import (
     RewardStabilityMonitor
 )
 from .wandb_callbacks import DetailedWandbCallback, GenericWandbCallback
-# Note: DetailedWandbCallback here will be the one from wandb_callbacks.py (originally from train.py)
+# Note: DetailedWandbCallback here will be the one from wandb.py (originally from train.py)
 # GenericWandbCallback is the one originally from utils.py
 from .persistence import CustomStatePersistenceCallback
 
@@ -25,7 +25,7 @@ __all__ = [
     "StepLoggingCallback",
     "DetailedRewardCallback",
     "RewardStabilityMonitor",
-    "DetailedWandbCallback", # This will refer to the one from wandb_callbacks.py
+    "DetailedWandbCallback", # This will refer to the one from wandb.py
     "GenericWandbCallback",
     "CustomStatePersistenceCallback"
 ]
