@@ -33,17 +33,64 @@ DATASET_BASE_PATH=$(dirname "${DATASET_PATH}")
 # 🔄 设置此变量为你想要从中恢复的 checkpoint 目录的路径
 # 例如: RESUME_FROM_CHECKPOINT_DIR="./enhanced_grpo_v2_runs/your_previous_run_output_dir/checkpoint-XXXX"
 # 将此留空以开始新的训练。将其设置为一个不存在的路径也会开始新的训练（会有警告）。
-RESUME_FROM_CHECKPOINT_DIR=""
+RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_v3_runs/v3-_home_qhy_Research_LLM_GRPO-RV_QWEN3-4B-LR6e-6-R64-20250605-163908-2/checkpoint-32"
 # "/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_v3_runs/v3-_home_qhy_Research_LLM_GRPO-RV_QWEN3-4B-LR1e-5-R64-20250604-232819-2/checkpoint-136"
 
-# 如果是从checkpoint恢复，可以选择性地修改W&B运行名称
+# 🔧 关键：WandB恢复配置
 if [ -n "${RESUME_FROM_CHECKPOINT_DIR}" ]; then
-    if [ -d "${RESUME_FROM_CHECKPOINT_DIR}" ]; then # 确保目录存在才修改名称
-        export WANDB_RUN_NAME="resumed-${WANDB_RUN_NAME}"
+    if [ -d "${RESUME_FROM_CHECKPOINT_DIR}" ]; then
+        echo "🔄 检测到checkpoint恢复，配置WandB恢复..."
+        
+        # 尝试从checkpoint目录提取WandB run ID
+        PARENT_DIR=$(dirname "${RESUME_FROM_CHECKPOINT_DIR}")
+        WANDB_DIR="${PARENT_DIR}/wandb"
+        
+        if [ -d "${WANDB_DIR}" ]; then
+            # 查找最新的run目录
+            LATEST_RUN_DIR=$(find "${WANDB_DIR}" -name "run-*" -type d | sort | tail -1)
+            if [ -n "${LATEST_RUN_DIR}" ]; then
+                # 提取run ID (格式: run-20231201_123456-abcd1234)
+                RUN_ID=$(basename "${LATEST_RUN_DIR}" | sed 's/run-[0-9]*_[0-9]*-//')
+                if [ -n "${RUN_ID}" ]; then
+                    export WANDB_RUN_ID="${RUN_ID}"
+                    export WANDB_RESUME="must"
+                    echo "✅ 找到WandB run ID: ${RUN_ID}"
+                    echo "✅ 设置WandB恢复模式: must"
+                else
+                    echo "⚠️ 无法从目录名提取run ID，将尝试自动恢复"
+                    export WANDB_RESUME="allow"
+                fi
+            else
+                echo "⚠️ 未找到WandB run目录，将尝试自动恢复"
+                export WANDB_RESUME="allow"
+            fi
+        else
+            echo "⚠️ 未找到WandB目录，将尝试自动恢复"
+            export WANDB_RESUME="allow"
+        fi
+        
+        # 修改运行名称以表示这是恢复的训练
+        if [ -z "${WANDB_RUN_ID}" ]; then
+            export WANDB_RUN_NAME="resumed-${WANDB_RUN_NAME}"
+        fi
+        
+        echo "🔄 WandB恢复配置完成:"
+        echo "  - WANDB_RUN_ID: ${WANDB_RUN_ID:-'(自动检测)'}"
+        echo "  - WANDB_RESUME: ${WANDB_RESUME}"
+        echo "  - WANDB_RUN_NAME: ${WANDB_RUN_NAME}"
+        
     else
         echo "⚠️ 警告: RESUME_FROM_CHECKPOINT_DIR ('${RESUME_FROM_CHECKPOINT_DIR}') 指定的目录不存在。将开始新的训练，并忽略此设置。"
         RESUME_FROM_CHECKPOINT_DIR="" # 清空以避免传递无效路径给Python脚本
+        # 确保不设置恢复相关的环境变量
+        unset WANDB_RUN_ID
+        unset WANDB_RESUME
     fi
+else
+    echo "🚀 开始新的训练运行"
+    # 确保不设置恢复相关的环境变量
+    unset WANDB_RUN_ID
+    unset WANDB_RESUME
 fi
 
 # 检查数据集文件是否存在

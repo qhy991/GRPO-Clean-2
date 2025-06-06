@@ -121,8 +121,8 @@ class VerilogSimulator:
                 else: # Some error or non-zero exit from VVP
                     result["simulation_run_success"] = False
                     vvp_err_msg = f"VVP sim error/non-zero exit. Code: {process_sim.returncode}."
-                    current_err = result["error_message"]
-                    result["error_message"] = f"{current_err + '; ' if current_err else ''}{vvp_err_msg}"
+                    current_error = result.get("error_message", "") or ""
+                    result["error_message"] = (current_error + "\n" + vvp_err_msg).strip()
 
                 if result["simulation_run_success"]:
                     # Use the parser method
@@ -134,7 +134,8 @@ class VerilogSimulator:
                     else: # Simulation ran but output was not parsable for test counts
                         result["parsing_success"] = False
                         err_msg_parse = "Could not parse VVP output for test counts, or 0 tests reported."
-                        result["error_message"] = (result.get("error_message", "") + "\n" + err_msg_parse).strip()
+                        current_error = result.get("error_message", "") or ""
+                        result["error_message"] = (current_error + "\n" + err_msg_parse).strip()
                         logger.warning(f"SIMULATOR: {err_msg_parse} for {prompt_identifier}")
 
                     if result["parsing_success"] and expected_total_tests_from_manifest > 0 and t != expected_total_tests_from_manifest:
@@ -144,10 +145,12 @@ class VerilogSimulator:
 
             except subprocess.TimeoutExpired:
                 result["simulation_run_success"] = False
-                result["error_message"] = (result.get("error_message", "") + "\n" + "VVP simulation timed out.").strip()
+                current_error = result.get("error_message", "") or ""
+                result["error_message"] = (current_error + "\n" + "VVP simulation timed out.").strip()
             except Exception as e:
                 result["simulation_run_success"] = False
-                result["error_message"] = (result.get("error_message", "") + "\n" + f"Error during VVP execution: {str(e)}").strip()
+                current_error = result.get("error_message", "") or ""
+                result["error_message"] = (current_error + "\n" + f"Error during VVP execution: {str(e)}").strip()
 
         if print_simulation_details:
             logger.debug(f"--- END OF SIMULATION RUN FOR PROMPT='{prompt_identifier[:60]}...', COMPLETION_IDX={completion_idx} ---\n" + "="*80 + "\n")

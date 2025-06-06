@@ -553,16 +553,28 @@ parse_llm_completion_with_context = parse_llm_completion # Alias for backward co
 def parse_llm_completion_with_context_qwen3(completion_text: str, prompt: str = None,
                                            step: int = None, sample_idx: int = None) -> Tuple[Optional[str], Optional[str]]:
     """
-    专门为Qwen3优化的带上下文的解析函数
+    Wrapper function that calls parse_llm_completion_qwen3 with debug context
     """
-    debug_context = {
-        "model": "qwen3",
-        "step": step,
-        "sample_idx": sample_idx,
-        "prompt_preview": prompt[:100] if prompt else None
-    }
-
+    debug_context = {}
+    if step is not None:
+        debug_context["step"] = step
+    if sample_idx is not None:
+        debug_context["sample_idx"] = sample_idx
+    
     return parse_llm_completion_qwen3(completion_text, debug_prompt=prompt, debug_context=debug_context)
+
+def parse_llm_completion_with_context(completion_text: str, prompt: str = None, 
+                                    step: int = None, sample_idx: int = None) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Wrapper function that calls parse_llm_completion with debug context
+    """
+    debug_context = {}
+    if step is not None:
+        debug_context["step"] = step
+    if sample_idx is not None:
+        debug_context["sample_idx"] = sample_idx
+    
+    return parse_llm_completion(completion_text, debug_prompt=prompt, debug_context=debug_context)
 
 def validate_and_fix_output_format(raw_output: str) -> Tuple[str, bool]:
     """
@@ -571,25 +583,25 @@ def validate_and_fix_output_format(raw_output: str) -> Tuple[str, bool]:
     """
     if not raw_output:
         return raw_output, False
-
+    
     original_output = raw_output
     needs_fix = False
-
+    
     # 移除Qwen对话标记
     if '<|im_start|>' in raw_output or '<|im_end|>' in raw_output:
         raw_output = re.sub(r'<\|im_start\|>.*?<\|im_end\|>', '', raw_output, flags=re.DOTALL)
         raw_output = re.sub(r'<\|im_start\|>assistant\n?', '', raw_output)
         raw_output = re.sub(r'<\|im_end\|>', '', raw_output)
         needs_fix = True
-
+    
     # 检查是否有think标签
     has_think_start = '<think>' in raw_output.lower()
     has_think_end = '</think>' in raw_output.lower()
-
+    
     # 检查是否有代码块
     has_verilog_block = '```verilog' in raw_output.lower()
     has_code_end = '```' in raw_output and raw_output.rfind('```') > raw_output.find('```verilog')
-
+    
     # 如果缺少think标签，尝试添加
     if not has_think_start and not has_think_end:
         # 查找可能的思考内容（在代码块之前的文本）
@@ -599,7 +611,7 @@ def validate_and_fix_output_format(raw_output: str) -> Tuple[str, bool]:
             if len(thinking_content) > 50:  # 有足够的内容
                 raw_output = f"<think>\n{thinking_content}\n</think>\n\n{raw_output[verilog_pos:]}"
                 needs_fix = True
-
+    
     # 如果只有开始标签，尝试修复结束标签
     elif has_think_start and not has_think_end:
         verilog_pos = raw_output.lower().find('```verilog')
@@ -609,7 +621,7 @@ def validate_and_fix_output_format(raw_output: str) -> Tuple[str, bool]:
             remaining_content = raw_output[verilog_pos:]
             raw_output = f"{think_content}\n</think>\n\n{remaining_content}"
             needs_fix = True
-
+    
     # 如果缺少verilog代码块标记，尝试添加
     if not has_verilog_block:
         # 查找module...endmodule模式
@@ -619,7 +631,7 @@ def validate_and_fix_output_format(raw_output: str) -> Tuple[str, bool]:
             # 替换原始的module代码为带标记的版本
             raw_output = raw_output.replace(module_code, f"```verilog\n{module_code}\n```")
             needs_fix = True
-
+    
     # 如果有开始标记但没有结束标记
     elif has_verilog_block and not has_code_end:
         verilog_pos = raw_output.lower().find('```verilog')
@@ -630,7 +642,7 @@ def validate_and_fix_output_format(raw_output: str) -> Tuple[str, bool]:
             if endmodule_match:
                 verilog_content = endmodule_match.group(1).strip()
                 remaining_content = after_verilog[endmodule_match.end():].strip()
-
+                
                 # 重构输出
                 before_verilog = raw_output[:verilog_pos]
                 if remaining_content:
@@ -638,5 +650,5 @@ def validate_and_fix_output_format(raw_output: str) -> Tuple[str, bool]:
                 else:
                     raw_output = f"{before_verilog}```verilog\n{verilog_content}\n```"
                 needs_fix = True
-
+    
     return raw_output.strip(), needs_fix

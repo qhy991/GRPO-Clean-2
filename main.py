@@ -9,6 +9,7 @@ from dataclasses import asdict
 import json
 from typing import Dict, Any, Optional, List
 from pathlib import Path
+import re
 
 # --- BEGIN: PyTorch Safe Unpickling Configuration ---
 logger_temp = logging.getLogger(__name__ + "_startup")
@@ -74,6 +75,9 @@ class GRPOTrainingPipeline:
         parser = HfArgumentParser((EnvConfig, ScriptConfig, EnhancedRewardConfig, GRPOConfig))
         self.env_cfg, self.script_cfg, self.reward_cfg, self.grpo_cfg = parser.parse_args_into_dataclasses()
 
+        # 🔧 新增：自动配置WandB恢复
+        self._configure_wandb_resume()
+
         # Setup logging first
         self._setup_logging()
         logger.info("GRPOTrainingPipeline initialized.")
@@ -101,9 +105,126 @@ class GRPOTrainingPipeline:
         self.tokenizer = None
         self.trainer = None
 
+    def _configure_wandb_resume(self):
+        """🔧 自动配置WandB恢复，无需外部脚本"""
+        try:
+            # 检查是否从checkpoint恢复
+            is_resuming = (
+                self.grpo_cfg.resume_from_checkpoint and
+                isinstance(self.grpo_cfg.resume_from_checkpoint, str) and
+                os.path.isdir(self.grpo_cfg.resume_from_checkpoint)
+            )
+            
+            if not is_resuming:
+                logger.info("🚀 开始新的训练，无需WandB恢复配置")
+                # 确保清除可能存在的恢复相关环境变量
+                for env_var in ["WANDB_RUN_ID", "WANDB_RESUME"]:
+                    if env_var in os.environ:
+                        del os.environ[env_var]
+                        logger.info(f"🧹 清除环境变量: {env_var}")
+                return
+            
+            checkpoint_path = Path(self.grpo_cfg.resume_from_checkpoint)
+            logger.info(f"🔄 检测到checkpoint恢复: {checkpoint_path}")
+            
+            # 尝试从checkpoint目录提取WandB run ID
+            run_id, run_url = self._extract_wandb_run_id(checkpoint_path)
+            
+            if run_id:
+                # 设置精确恢复
+                os.environ["WANDB_RUN_ID"] = run_id
+                os.environ["WANDB_RESUME"] = "must"
+                logger.info(f"✅ WandB精确恢复配置:")
+                logger.info(f"  - Run ID: {run_id}")
+                logger.info(f"  - Resume Mode: must")
+                if run_url:
+                    logger.info(f"  - Run URL: {run_url}")
+            else:
+                # 使用自动恢复模式
+                os.environ["WANDB_RESUME"] = "allow"
+                logger.info("⚠️ 未找到具体的Run ID，使用自动恢复模式")
+                logger.info("  - Resume Mode: allow")
+            
+            logger.info("✅ WandB恢复配置完成")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ WandB恢复配置失败: {e}")
+            logger.info("🔄 将使用默认的WandB配置")
+
+    def _extract_wandb_run_id(self, checkpoint_path: Path) -> tuple[Optional[str], Optional[str]]:
+        """从checkpoint目录中提取WandB run ID"""
+        try:
+            # 方法1: 从wandb目录中查找
+            parent_dir = checkpoint_path.parent
+            wandb_dir = parent_dir / "wandb"
+            
+            if wandb_dir.exists():
+                logger.info(f"🔍 在 {wandb_dir} 中查找WandB run信息...")
+                
+                # 查找run目录
+                run_dirs = list(wandb_dir.glob("run-*"))
+                if run_dirs:
+                    latest_run_dir = sorted(run_dirs)[-1]
+                    logger.info(f"📁 找到run目录: {latest_run_dir.name}")
+                    
+                    # 提取run ID (格式: run-20231201_123456-abcd1234)
+                    run_name = latest_run_dir.name
+                    if "-" in run_name:
+                        parts = run_name.split("-")
+                        if len(parts) >= 3:
+                            run_id = parts[-1]  # 最后一部分是run ID
+                            logger.info(f"✅ 提取到run ID: {run_id}")
+                            
+                            # 尝试读取run信息
+                            run_info_file = latest_run_dir / "files" / "wandb-metadata.json"
+                            run_url = None
+                            if run_info_file.exists():
+                                try:
+                                    with open(run_info_file, 'r') as f:
+                                        metadata = json.load(f)
+                                        run_url = metadata.get('url', '')
+                                        if run_url:
+                                            logger.info(f"🔗 找到Run URL: {run_url}")
+                                except Exception as e:
+                                    logger.warning(f"⚠️ 读取metadata失败: {e}")
+                            
+                            return run_id, run_url
+            
+            # 方法2: 从trainer_state.json中查找
+            trainer_state_file = checkpoint_path / "trainer_state.json"
+            if trainer_state_file.exists():
+                logger.info(f"🔍 在 {trainer_state_file} 中查找训练状态...")
+                try:
+                    with open(trainer_state_file, 'r') as f:
+                        state_data = json.load(f)
+                        
+                    # 查找log_history中的wandb相关信息
+                    log_history = state_data.get('log_history', [])
+                    for entry in log_history:
+                        if isinstance(entry, dict):
+                            for key, value in entry.items():
+                                if 'wandb' in key.lower() or '_wandb' in str(value):
+                                    logger.info(f"📊 找到WandB相关日志: {key}")
+                                    break
+                                    
+                except Exception as e:
+                    logger.warning(f"⚠️ 读取trainer_state.json失败: {e}")
+            
+            # 方法3: 检查环境变量中是否已有run ID
+            env_run_id = os.getenv("WANDB_RUN_ID")
+            if env_run_id:
+                logger.info(f"🔄 使用环境变量中的WandB run ID: {env_run_id}")
+                return env_run_id, None
+            
+            logger.info("❌ 未能找到WandB run ID")
+            return None, None
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 提取WandB run ID时出错: {e}")
+            return None, None
+
     def _setup_logging(self):
         """Setup logging with improved error handling"""
-        import re
         from datetime import datetime
 
         run_specific_name_from_env = os.getenv("WANDB_RUN_NAME")
@@ -422,6 +543,10 @@ class GRPOTrainingPipeline:
         """Main training function with comprehensive error handling"""
         try:
             logger.info("🚀 Starting GRPO training process...")
+            
+            # 🔧 关键：在训练开始前配置WandB恢复
+            logger.info("📝 Step 0: Configuring WandB resume settings...")
+            self._configure_wandb_resume()
 
             # 1. Setup model and tokenizer - 🔧 修复调用
             logger.info("📝 Step 1: Setting up model and tokenizer...")
