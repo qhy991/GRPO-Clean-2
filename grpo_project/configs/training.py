@@ -58,6 +58,10 @@ class ScriptConfig:
         default="balanced",
         metadata={"help": "Complexity emphasis: 'simple', 'balanced', 'complex'"}
     )
+    curriculum_performance_check_interval: int = field(
+        default=25,
+        metadata={"help": "How many steps between performance checks for curriculum advancement. Lower values (10) = more frequent checks, higher values (50) = less frequent checks."}
+    )
 
     # Experience replay config
     enable_experience_replay: bool = field(default=True, metadata={"help": "Enable experience replay buffer."})

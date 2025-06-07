@@ -108,8 +108,13 @@ class DetailedInferenceCallback(BaseCallback):
 
     def on_step_end(self, args, state, control, model=None, **kwargs):
         """完整的推理回调实现，生成eval_avg_test_pass_rate指标"""
+        # 添加调试日志
+        if state.global_step > 0 and state.global_step % 5 == 0:  # 每5步记录一次调试信息
+            logger.info(f"🔍 DetailedInferenceCallback调试: 步数={state.global_step}, eval_every_n_steps={self.eval_every_n_steps}, 取模结果={state.global_step % self.eval_every_n_steps}")
+        
         if state.global_step > 0 and state.global_step % self.eval_every_n_steps == 0:
             if model is None or args.local_rank > 0: # 确保只在主进程执行
+                logger.warning(f"⚠️ DetailedInferenceCallback: 跳过步数 {state.global_step} - model is None: {model is None}, local_rank: {getattr(args, 'local_rank', -1)}")
                 return
 
             logger.info(f"\n🔍 === 推理回调 (DetailedInferenceCallback) - 步数 {state.global_step} ===")
@@ -230,8 +235,27 @@ class DetailedInferenceCallback(BaseCallback):
                         "eval_current_step_samples_with_tests": current_step_samples_with_tests,
                         "eval_current_step_total_pass_ratio_sum": current_step_total_pass_ratio_sum,
                     }
-                    wandb.log(log_data_wandb, step=state.global_step)
-                    logger.info(f"✅ DetailedInferenceCallback: 记录到W&B - 步数 {state.global_step}: AvgPassRate={avg_test_pass_rate_current_step:.4f}, SamplesWithTests={current_step_samples_with_tests}")
+                    # 🔧 关键：使用WandB同步管理器记录，并动态更新步数偏移
+                    try:
+                        from grpo_project.core.wandb_sync_manager import safe_wandb_log, update_wandb_step_offset
+                        
+                        # 首先更新步数偏移（确保同步）
+                        update_wandb_step_offset(state.global_step)
+                        
+                        # 然后安全记录
+                        success = safe_wandb_log(log_data_wandb, state.global_step, commit=True)
+                        if success:
+                            logger.info(f"✅ DetailedInferenceCallback: 记录到W&B (同步修正) - 步数 {state.global_step}: AvgPassRate={avg_test_pass_rate_current_step:.4f}, SamplesWithTests={current_step_samples_with_tests}")
+                        else:
+                            logger.warning(f"⚠️ DetailedInferenceCallback: WandB同步记录失败 - 步数 {state.global_step}")
+                    except ImportError:
+                        # 降级到原生wandb.log
+                        wandb.log(log_data_wandb, step=state.global_step, commit=True)
+                        logger.info(f"✅ DetailedInferenceCallback: 记录到W&B (原生) - 步数 {state.global_step}: AvgPassRate={avg_test_pass_rate_current_step:.4f}, SamplesWithTests={current_step_samples_with_tests}")
+                        logger.warning(f"⚠️ 注意：使用原生WandB记录，可能存在步数同步问题")
+                    
+                    # 额外记录调试信息
+                    logger.info(f"🔍 DetailedInferenceCallback调试: 总通过率总和={current_step_total_pass_ratio_sum:.4f}, 有效样本数={current_step_samples_with_tests}")
                 else:
                     logger.warning("⚠️ WandB运行未找到，无法记录eval_avg_test_pass_rate")
             except ImportError:

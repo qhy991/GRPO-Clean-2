@@ -3,7 +3,7 @@
 
 # --- Exit on error ---
 set -e
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 # --- Get the directory where the script is located ---
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PYTHON_EXECUTABLE="python3"
@@ -33,7 +33,8 @@ DATASET_BASE_PATH=$(dirname "${DATASET_PATH}")
 # 🔄 设置此变量为你想要从中恢复的 checkpoint 目录的路径
 # 例如: RESUME_FROM_CHECKPOINT_DIR="./enhanced_grpo_v2_runs/your_previous_run_output_dir/checkpoint-XXXX"
 # 将此留空以开始新的训练。将其设置为一个不存在的路径也会开始新的训练（会有警告）。
-RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_v3_runs/v3-_home_qhy_Research_LLM_GRPO-RV_QWEN3-4B-LR6e-6-R64-20250605-163908-2/checkpoint-32"
+RESUME_FROM_CHECKPOINT_DIR=""
+# "/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_v3_runs/v3-_home_qhy_Research_LLM_GRPO-RV_QWEN3-4B-LR6e-6-R64-20250605-163908-2/checkpoint-32"
 # "/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_v3_runs/v3-_home_qhy_Research_LLM_GRPO-RV_QWEN3-4B-LR1e-5-R64-20250604-232819-2/checkpoint-136"
 
 # 🔧 关键：WandB恢复配置
@@ -176,6 +177,12 @@ CURRICULUM_TYPE="dual_layer"
 
 CURRICULUM_FOCUS_LEVELS="advanced basic intermediate"
 CURRICULUM_COMPLEXITY_EMPHASIS="simple"   # 选项: "simple", "balanced", "complex"
+
+# 🔧 新增：课程学习性能检查间隔配置
+# 控制多少步检查一次性能并判断是否可以进阶到下一阶段
+# 较小的值(如10)：更频繁检查，响应更快，但计算开销稍大
+# 较大的值(如50)：检查较少，节省计算，但响应稍慢
+CURRICULUM_PERFORMANCE_CHECK_INTERVAL=25  # 默认每25步检查一次
 
 # 如果你的数据集主要是基础级别，使用:
 # CURRICULUM_FOCUS_LEVELS="basic intermediate"
@@ -339,6 +346,7 @@ echo "Enhanced Features Summary:"
 echo "  ✅ Multi-objective reward system with detailed component tracking"
 echo "  ✅ Dual-layer curriculum learning: ${CURRICULUM_TYPE} (${CURRICULUM_FOCUS_LEVELS})"
 echo "  ✅ Complexity emphasis: ${CURRICULUM_COMPLEXITY_EMPHASIS}"
+echo "  ✅ Curriculum performance check interval: every ${CURRICULUM_PERFORMANCE_CHECK_INTERVAL} steps"
 echo "  ✅ Experience replay: ${ENABLE_EXPERIENCE_REPLAY} (buffer size: ${EXPERIENCE_BUFFER_SIZE})"
 echo "  ✅ Adaptive reward scaling: ${REWARD_ENABLE_ADAPTIVE_SCALING}"
 echo "  ✅ Enhanced LoRA: rank=${LORA_RANK}, alpha=${LORA_ALPHA}"
@@ -386,6 +394,7 @@ CMD_ARGS="${CMD_ARGS} --enable_curriculum ${ENABLE_CURRICULUM}"
 CMD_ARGS="${CMD_ARGS} --curriculum_type ${CURRICULUM_TYPE}"
 CMD_ARGS="${CMD_ARGS} --curriculum_focus_levels ${CURRICULUM_FOCUS_LEVELS}"
 CMD_ARGS="${CMD_ARGS} --curriculum_complexity_emphasis ${CURRICULUM_COMPLEXITY_EMPHASIS}"
+CMD_ARGS="${CMD_ARGS} --curriculum_performance_check_interval ${CURRICULUM_PERFORMANCE_CHECK_INTERVAL}"
 
 # Experience Replay
 CMD_ARGS="${CMD_ARGS} --enable_experience_replay ${ENABLE_EXPERIENCE_REPLAY}"

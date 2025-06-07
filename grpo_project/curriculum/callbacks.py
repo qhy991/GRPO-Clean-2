@@ -27,14 +27,18 @@ logger = logging.getLogger(__name__)
 class CurriculumProgressCallback(TrainerCallback):
     """增强的课程学习进度回调，产生详细的调试日志"""
     
-    def __init__(self, curriculum_manager, trainer_ref: Optional['Trainer'] = None, output_dir: Optional[str] = None):
+    def __init__(self, curriculum_manager, trainer_ref: Optional['Trainer'] = None, output_dir: Optional[str] = None, 
+                 performance_check_interval: int = 25):
         self.curriculum_manager = curriculum_manager
         self.trainer_ref = trainer_ref
         self.output_dir = output_dir
+        self.performance_check_interval = performance_check_interval  # 新增：可配置的检查间隔
         self.debug_log_path = os.path.join(output_dir, "curriculum_progress_debug.txt") if output_dir else "curriculum_progress_debug.txt"
         self.last_locally_logged_stage_idx: int = -1
         self.evaluation_count = 0
         self.last_performance_check_step = 0
+        self.performance_history = []  # 存储性能历史
+        self.step_count_in_current_stage = 0  # 当前阶段的步数计数
         
         # 确保输出目录存在
         if self.output_dir:
@@ -44,9 +48,10 @@ class CurriculumProgressCallback(TrainerCallback):
                 f.write(f"初始化课程学习调试回调\n")
                 f.write(f"调试日志路径: {self.debug_log_path}\n")
                 f.write(f"输出目录: {self.output_dir}\n")
+                f.write(f"性能检查间隔: 每{self.performance_check_interval}步\n")  # 新增日志
                 f.write("="*80 + "\n")
         
-        logger.info(f"✅ CurriculumProgressCallback initialized. Debug log: {self.debug_log_path}")
+        logger.info(f"✅ CurriculumProgressCallback initialized. Debug log: {self.debug_log_path}, Check interval: {self.performance_check_interval} steps")
 
     def _write_debug(self, message: str):
         """写入调试信息到专用文件和控制台"""
@@ -62,6 +67,43 @@ class CurriculumProgressCallback(TrainerCallback):
                 f.write(debug_msg + "\n")
         except Exception as e:
             logger.warning(f"Failed to write debug log: {e}")
+
+    def _calculate_performance_from_logs(self, logs: Optional[Dict[str, float]]) -> float:
+        """从日志中计算性能指标 - 修复版本"""
+        if not logs:
+            return 0.0
+            
+        # 1. 优先使用评估指标
+        if 'eval_avg_test_pass_rate' in logs:
+            performance = logs['eval_avg_test_pass_rate']
+            self._write_debug(f"📊 使用评估指标 eval_avg_test_pass_rate: {performance:.4f}")
+            return performance
+            
+        # 2. 使用reward指标 (GRPO训练的核心指标)
+        if 'reward' in logs:
+            reward = logs['reward']
+            # 将reward转换为性能分数 (假设reward > 0 表示好的性能)
+            # 使用sigmoid函数将reward映射到[0,1]范围
+            performance = 1.0 / (1.0 + np.exp(-max(0, reward / 5.0)))  # 缓和的sigmoid
+            self._write_debug(f"📊 使用reward指标转换: reward={reward:.4f} -> performance={performance:.4f}")
+            return performance
+            
+        # 3. 使用损失指标转换
+        if 'loss' in logs:
+            loss = logs['loss']
+            # 将loss转换为性能分数 (loss越小，性能越好)
+            performance = max(0.0, 1.0 - min(loss, 1.0))
+            self._write_debug(f"📊 使用loss指标转换: loss={loss:.4f} -> performance={performance:.4f}")
+            return performance
+            
+        if 'train_loss' in logs:
+            loss = logs['train_loss']
+            performance = max(0.0, 1.0 - min(loss, 1.0))
+            self._write_debug(f"📊 使用train_loss指标转换: loss={loss:.4f} -> performance={performance:.4f}")
+            return performance
+            
+        self._write_debug("⚠️ 未找到可用的性能指标，返回默认值 0.0")
+        return 0.0
 
     def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         """训练开始时的详细日志"""
@@ -121,39 +163,29 @@ class CurriculumProgressCallback(TrainerCallback):
             self._basic_status_check(current_step, state)
 
     def on_evaluate(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        """评估时的详细处理"""
+        """评估时的详细处理 - 修复版本"""
         if not self.curriculum_manager or args.local_rank > 0:
             return
             
         current_step = getattr(state, 'global_step', 0) or 0
         self.evaluation_count += 1
+        current_stage_idx = self.curriculum_manager.current_stage
         
         self._write_debug(f"📈 第{self.evaluation_count}次评估 (步数: {current_step})")
         
-        # 查找最新的性能指标
-        avg_test_pass_rate = 0.0
-        found_metric = False
+        # 从最新的日志条目中获取性能
+        performance_estimate = 0.0
+        if state.log_history:
+            latest_logs = state.log_history[-1]
+            performance_estimate = self._calculate_performance_from_logs(latest_logs)
         
-        for log_entry in reversed(state.log_history):
-            if 'eval_avg_test_pass_rate' in log_entry:
-                avg_test_pass_rate = log_entry['eval_avg_test_pass_rate']
-                found_metric = True
-                self._write_debug(f"✅ 找到性能指标 'eval_avg_test_pass_rate': {avg_test_pass_rate:.4f}")
-                break
-
-        if not found_metric:
-            self._write_debug("⚠️ 未找到 'eval_avg_test_pass_rate' 指标，使用默认值 0.0")
-            # 尝试其他可能的指标
-            for log_entry in reversed(state.log_history):
-                if 'eval_loss' in log_entry:
-                    eval_loss = log_entry['eval_loss']
-                    avg_test_pass_rate = max(0, 1.0 - min(eval_loss, 1.0))  # 简单转换
-                    self._write_debug(f"📊 使用 eval_loss 转换: {eval_loss:.4f} -> {avg_test_pass_rate:.4f}")
-                    found_metric = True
-                    break
-
-        performance_estimate = avg_test_pass_rate
-        current_stage_idx = self.curriculum_manager.current_stage
+        # 记录到性能历史 - 修复：确保包含stage信息
+        self.performance_history.append({
+            'step': current_step,
+            'performance': performance_estimate,
+            'stage': current_stage_idx,  # 修复：明确指定stage
+            'timestamp': datetime.now().isoformat()
+        })
         
         self._write_debug(f"📊 评估详情:")
         self._write_debug(f"  - 当前阶段: {current_stage_idx}")
@@ -164,109 +196,117 @@ class CurriculumProgressCallback(TrainerCallback):
             threshold = stage_config.performance_threshold
             min_evals = stage_config.min_evaluations
             
-            # 获取当前阶段的历史表现
-            stage_history = getattr(self.curriculum_manager, 'stage_performance_history', [])
-            
             self._write_debug(f"  - 阶段名称: {stage_config.name}")
             self._write_debug(f"  - 性能阈值: {threshold}")
             self._write_debug(f"  - 最小评估次数要求: {min_evals}")
-            self._write_debug(f"  - 当前阶段评估历史长度: {len(stage_history)}")
+            self._write_debug(f"  - 当前阶段评估历史长度: {len(self.performance_history)}")
             
-            if len(stage_history) > 0:
-                recent_performance = stage_history[-min(3, len(stage_history)):]
-                avg_recent = np.mean(recent_performance) if recent_performance else 0
-                self._write_debug(f"  - 最近表现均值: {avg_recent:.4f} (基于最近{len(recent_performance)}次)")
+            # 检查进阶条件
+            self._check_and_advance_stage(performance_estimate, current_step)
 
-            # 检查是否应该进阶
-            try:
-                should_advance = self.curriculum_manager.should_advance_stage(performance_estimate)
-                self._write_debug(f"  - 进阶检查结果: {should_advance}")
+    def _check_and_advance_stage(self, current_performance: float, current_step: int):
+        """检查并执行阶段进阶 - 修复版本"""
+        current_stage_idx = self.curriculum_manager.current_stage
+        
+        if current_stage_idx >= len(self.curriculum_manager.curriculum_stages):
+            return  # 已完成所有阶段
+            
+        stage_config = self.curriculum_manager.curriculum_stages[current_stage_idx]
+        
+        # 获取当前阶段的性能历史 - 修复：正确过滤stage
+        stage_performances = [p['performance'] for p in self.performance_history 
+                            if p.get('stage') == current_stage_idx]  # 修复：使用 == 而不是默认值
+        
+        self._write_debug(f"📊 当前阶段性能历史: {len(stage_performances)} 条记录")
+        
+        if len(stage_performances) >= stage_config.min_evaluations:
+            recent_performances = stage_performances[-min(3, len(stage_performances)):]
+            avg_recent_performance = np.mean(recent_performances)
+            
+            self._write_debug(f"📊 进阶条件检查:")
+            self._write_debug(f"  - 当前性能: {current_performance:.4f}")
+            self._write_debug(f"  - 最近平均性能: {avg_recent_performance:.4f}")
+            self._write_debug(f"  - 性能阈值: {stage_config.performance_threshold}")
+            self._write_debug(f"  - 评估次数: {len(stage_performances)}/{stage_config.min_evaluations}")
+            
+            if avg_recent_performance >= stage_config.performance_threshold:
+                self._write_debug("✅ 满足进阶条件，执行阶段进阶...")
                 
-                if should_advance:
-                    self._write_debug("🎯 满足进阶条件，尝试进阶...")
-                    old_stage = current_stage_idx
-                    advance_success = self.curriculum_manager.advance_stage()
+                old_stage = current_stage_idx
+                try:
+                    # 修复：优先使用课程管理器自带的should_advance_stage方法
+                    if hasattr(self.curriculum_manager, 'should_advance_stage'):
+                        should_advance = self.curriculum_manager.should_advance_stage(current_performance)
+                        if should_advance:
+                            success = self.curriculum_manager.advance_stage()
+                        else:
+                            success = False
+                            self._write_debug("⏳ 课程管理器判断暂不进阶")
+                    elif hasattr(self.curriculum_manager, 'advance_stage'):
+                        success = self.curriculum_manager.advance_stage()
+                    else:
+                        # 手动进阶 - 作为最后的后备方案
+                        self.curriculum_manager.current_stage += 1
+                        success = True
                     
-                    if advance_success:
+                    if success:
                         new_stage = self.curriculum_manager.current_stage
-                        new_dataset = self.curriculum_manager.get_current_stage_dataset()
+                        self._write_debug(f"🎯 成功进阶: 阶段{old_stage} -> 阶段{new_stage}")
                         
-                        self._write_debug(f"✅ 成功进阶: 阶段{old_stage} -> 阶段{new_stage}")
-                        self._write_debug(f"  - 新阶段数据集大小: {len(new_dataset)}")
+                        # 重置阶段计数器
+                        self.step_count_in_current_stage = 0
                         
                         if new_stage < len(self.curriculum_manager.curriculum_stages):
                             new_stage_info = self.curriculum_manager.curriculum_stages[new_stage]
-                            self._write_debug(f"  - 新阶段名称: {new_stage_info.name}")
-                            self._write_debug(f"  - 新阶段目标等级: {new_stage_info.dataset_levels}")
-                            self._write_debug(f"  - 新阶段复杂度: {new_stage_info.complexity_range}")
-                        
-                        # 记录进阶历史
-                        progress_record = {
-                            "step": current_step,
-                            "evaluation_count": self.evaluation_count,
-                            "old_stage_idx": old_stage,
-                            "new_stage_idx": new_stage,
-                            "performance_metric": performance_estimate,
-                            "new_dataset_size": len(new_dataset),
-                            "timestamp": datetime.now().isoformat()
-                        }
-                        
-                        progress_file = os.path.join(self.output_dir, "stage_progress.jsonl")
-                        with open(progress_file, 'a', encoding='utf-8') as f:
-                            f.write(json.dumps(progress_record, ensure_ascii=False) + "\n")
-                        
-                        # W&B 记录
-                        try:
-                            import wandb
-                            if wandb.run is not None:
-                                wandb.log({
-                                    "curriculum/stage_transition": 1,
-                                    "curriculum/old_stage_index": old_stage,
-                                    "curriculum/new_stage_index": new_stage,
-                                    "curriculum/performance_metric": performance_estimate,
-                                    "curriculum/new_dataset_size": len(new_dataset)
-                                }, step=current_step)
-                                self._write_debug("📊 进阶信息已记录到 W&B")
-                        except ImportError:
-                            pass
-                        except Exception as e:
-                            self._write_debug(f"⚠️ W&B 记录失败: {e}")
-                    else:
-                        self._write_debug("❌ 进阶失败")
-                else:
-                    # 详细说明为什么不能进阶
-                    reasons = []
-                    if len(stage_history) < min_evals:
-                        reasons.append(f"评估次数不足 ({len(stage_history)}/{min_evals})")
-                    if performance_estimate < threshold:
-                        reasons.append(f"性能未达标 ({performance_estimate:.4f} < {threshold})")
-                    
-                    if reasons:
-                        self._write_debug(f"⏳ 暂不进阶，原因: {', '.join(reasons)}")
-                    else:
-                        self._write_debug("⏳ 进阶条件检查中...")
-                        
-            except Exception as e:
-                self._write_debug(f"❌ 进阶检查异常: {e}")
+                            try:
+                                new_dataset = self.curriculum_manager.get_current_stage_dataset()
+                                self._write_debug(f"  - 新阶段名称: {new_stage_info.name}")
+                                self._write_debug(f"  - 新阶段数据集大小: {len(new_dataset)}")
+                                self._write_debug(f"  - 新阶段目标等级: {new_stage_info.dataset_levels}")
+                            except Exception as e:
+                                self._write_debug(f"  - 新阶段信息获取部分失败: {e}")
+                        else:
+                            self._write_debug("🏆 已完成所有课程阶段！")
+                            
+                except Exception as e:
+                    self._write_debug(f"❌ 阶段进阶失败: {e}")
+            else:
+                self._write_debug(f"⏳ 未满足进阶条件 (需要性能 >= {stage_config.performance_threshold:.4f})")
         else:
-            self._write_debug("🎉 所有课程阶段已完成")
+            self._write_debug(f"⏳ 评估次数不足 ({len(stage_performances)}/{stage_config.min_evaluations})")
 
     def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, logs: Optional[Dict[str, float]] = None, **kwargs):
-        """日志记录时的处理"""
+        """日志记录时的处理 - 修复版本"""
         if not self.curriculum_manager or args.local_rank > 0:
             return
 
         current_step = getattr(state, 'global_step', 0) or 0
+        self.step_count_in_current_stage += 1
+        current_stage_idx = self.curriculum_manager.current_stage
         
         # 检查阶段是否发生变化
-        current_stage_idx = self.curriculum_manager.current_stage
         if not hasattr(self, 'last_locally_logged_stage_idx') or self.last_locally_logged_stage_idx != current_stage_idx:
             self._stage_change_log(current_step, current_stage_idx)
             self.last_locally_logged_stage_idx = current_stage_idx
 
-        # 每25步记录一次详细状态
-        if current_step % 25 == 0 and current_step > 0:
+        # 每N步记录一次详细状态，并检查性能（N可配置）
+        if current_step % self.performance_check_interval == 0 and current_step > 0:
             self._log_curriculum_status(current_step, logs)
+            
+            # 基于训练日志进行性能评估和可能的阶段进阶
+            if logs:
+                performance = self._calculate_performance_from_logs(logs)
+                if performance > 0:
+                    # 记录性能历史 - 修复：确保包含正确的stage信息
+                    self.performance_history.append({
+                        'step': current_step,
+                        'performance': performance,
+                        'stage': current_stage_idx,  # 修复：明确指定当前stage
+                        'timestamp': datetime.now().isoformat()
+                    })
+                    
+                    # 检查是否可以进阶
+                    self._check_and_advance_stage(performance, current_step)
 
         # W&B 记录
         self._wandb_log(current_step, logs)
@@ -332,7 +372,7 @@ class CurriculumProgressCallback(TrainerCallback):
             self._write_debug(f"  - 学习率: {learning_rate}")
 
     def _wandb_log(self, current_step: int, logs: Optional[Dict[str, float]]):
-        """W&B 记录"""
+        """W&B 记录 - 修复版本"""
         try:
             import wandb
             if wandb.run is None:
@@ -350,18 +390,34 @@ class CurriculumProgressCallback(TrainerCallback):
                 performance_threshold = stage.performance_threshold
             
             # 获取最新的性能估计
-            latest_performance = 0.0
-            if logs and 'eval_avg_test_pass_rate' in logs:
-                latest_performance = logs['eval_avg_test_pass_rate']
+            latest_performance = self._calculate_performance_from_logs(logs) if logs else 0.0
             
-            wandb.log({
+            # 计算当前阶段的平均性能
+            stage_performances = [p['performance'] for p in self.performance_history 
+                                if p.get('stage', current_stage_idx) == current_stage_idx]
+            avg_stage_performance = np.mean(stage_performances) if stage_performances else 0.0
+            
+            wandb_data = {
                 "curriculum/current_stage_idx": current_stage_idx,
                 "curriculum/current_stage_name_numeric": current_stage_idx,
                 "curriculum/dataset_size": dataset_size,
                 "curriculum/performance_threshold": performance_threshold,
                 "curriculum/latest_performance": latest_performance,
-                "curriculum/evaluation_count": self.evaluation_count
-            }, step=current_step)
+                "curriculum/evaluation_count": len(self.performance_history),
+                "curriculum/stage_step_count": self.step_count_in_current_stage,
+                "curriculum/avg_stage_performance": avg_stage_performance
+            }
+            
+            # 添加更多调试信息
+            if logs:
+                if 'loss' in logs:
+                    wandb_data["curriculum/current_loss"] = logs['loss']
+                if 'reward' in logs:
+                    wandb_data["curriculum/current_reward"] = logs['reward']
+                if 'learning_rate' in logs:
+                    wandb_data["curriculum/learning_rate"] = logs['learning_rate']
+            
+            wandb.log(wandb_data, step=current_step)
             
         except ImportError:
             pass

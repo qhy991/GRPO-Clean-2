@@ -66,6 +66,7 @@ from grpo_project.callbacks.persistence import CustomStatePersistenceCallback
 from grpo_project.callbacks.inference import DetailedInferenceCallback
 from grpo_project.callbacks.wandb import DetailedWandbCallback as TrainDetailedWandbCallback
 from grpo_project.curriculum.callbacks import CurriculumProgressCallback, EnhancedCurriculumDebugCallback, OptimizedCurriculumCallback
+from grpo_project.core.wandb_sync_manager import initialize_wandb_sync_manager, get_wandb_sync_manager
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,9 @@ class GRPOTrainingPipeline:
         self._setup_logging()
         logger.info("GRPOTrainingPipeline initialized.")
         self._log_configs()
+
+        # 🔧 新增：初始化WandB同步管理器
+        self._setup_wandb_sync_manager()
 
         # Initialize core components
         self.model_manager = ModelManager(
@@ -150,6 +154,70 @@ class GRPOTrainingPipeline:
         except Exception as e:
             logger.warning(f"⚠️ WandB恢复配置失败: {e}")
             logger.info("🔄 将使用默认的WandB配置")
+
+    def _setup_wandb_sync_manager(self):
+        """🔧 设置WandB同步管理器"""
+        try:
+            # 从配置中获取项目信息
+            project_name = getattr(self.env_cfg, 'wandb_project', 'VerilogGRPO_Enhanced_v3')
+            run_name = f"grpo_run_{os.path.basename(self.grpo_cfg.output_dir)}"
+            
+            # 初始化同步管理器
+            sync_manager = initialize_wandb_sync_manager(
+                output_dir=self.grpo_cfg.output_dir,
+                project_name=project_name,
+                run_name=run_name
+            )
+            
+            logger.info("✅ WandB同步管理器初始化成功")
+            logger.info(f"  - 项目: {project_name}")
+            logger.info(f"  - 运行名称: {run_name}")
+            logger.info(f"  - 输出目录: {self.grpo_cfg.output_dir}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ WandB同步管理器初始化失败: {e}")
+            logger.info("🔄 将使用原生WandB功能")
+
+    def _setup_wandb_run(self):
+        """🔧 设置WandB运行，处理断续训练"""
+        try:
+            sync_manager = get_wandb_sync_manager()
+            if not sync_manager:
+                logger.warning("⚠️ WandB同步管理器未找到，跳过WandB运行设置")
+                return
+                
+            # 检查是否从checkpoint恢复
+            resume_from_checkpoint = None
+            if (self.grpo_cfg.resume_from_checkpoint and 
+                isinstance(self.grpo_cfg.resume_from_checkpoint, str) and
+                os.path.isdir(self.grpo_cfg.resume_from_checkpoint)):
+                resume_from_checkpoint = self.grpo_cfg.resume_from_checkpoint
+                
+            # 准备配置
+            config = {
+                "model_name_or_path": self.script_cfg.model_name_or_path,
+                "learning_rate": self.grpo_cfg.learning_rate,
+                "per_device_train_batch_size": self.grpo_cfg.per_device_train_batch_size,
+                "max_seq_length": self.script_cfg.max_seq_length,
+                "callback_eval_every_n_steps": self.script_cfg.callback_eval_every_n_steps,
+                "lora_rank": getattr(self.script_cfg, 'lora_rank', None),
+                "curriculum_enabled": self.curriculum_manager is not None,
+                "resume_from_checkpoint": resume_from_checkpoint,
+            }
+            
+            # 设置WandB运行
+            success = sync_manager.setup_wandb_run(
+                resume_from_checkpoint=resume_from_checkpoint,
+                config=config
+            )
+            
+            if success:
+                logger.info("✅ WandB运行设置成功")
+            else:
+                logger.warning("⚠️ WandB运行设置失败，将使用本地日志")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ WandB运行设置异常: {e}")
 
     def _extract_wandb_run_id(self, checkpoint_path: Path) -> tuple[Optional[str], Optional[str]]:
         """从checkpoint目录中提取WandB run ID"""
@@ -405,7 +473,8 @@ class GRPOTrainingPipeline:
                 curriculum_progress_cb = CurriculumProgressCallback(
                     curriculum_manager=self.curriculum_manager, 
                     trainer_ref=None,  # 稍后设置
-                    output_dir=self.script_cfg.output_dir
+                    output_dir=self.script_cfg.output_dir,
+                    performance_check_interval=self.script_cfg.curriculum_performance_check_interval
                 )
                 self.callbacks.append(curriculum_progress_cb)
                 logger.info("✅ 添加 CurriculumProgressCallback")
@@ -456,15 +525,20 @@ class GRPOTrainingPipeline:
                 else:
                     logger.warning("⚠️ No samples available for DetailedInferenceCallback.")
 
-            # W&B callback
+            # 🔧 关键修复：禁用原生WandB回调，使用同步管理器
             if self.grpo_cfg.local_rank <= 0 and "wandb" in self.grpo_cfg.report_to:
-                wandb_cb = TrainDetailedWandbCallback(
-                    self.env_cfg, self.script_cfg, self.reward_cfg, self.experience_buffer
+                # 创建使用同步管理器的WandB回调
+                from grpo_project.callbacks.wandb_sync_callback import SyncedWandbCallback
+                wandb_cb = SyncedWandbCallback(
+                    env_cfg=self.env_cfg, 
+                    script_cfg=self.script_cfg, 
+                    reward_cfg=self.reward_cfg, 
+                    experience_buffer=self.experience_buffer
                 )
                 self.callbacks.append(wandb_cb)
                 # 存储 wandb_callback 引用供 reward function 使用
                 self.wandb_callback = wandb_cb
-                logger.info("✅ TrainDetailedWandbCallback added.")
+                logger.info("✅ SyncedWandbCallback added (替代原生WandB).")
 
             logger.info(f"Total callbacks prepared: {len(self.callbacks)}")
             
@@ -547,6 +621,10 @@ class GRPOTrainingPipeline:
             # 🔧 关键：在训练开始前配置WandB恢复
             logger.info("📝 Step 0: Configuring WandB resume settings...")
             self._configure_wandb_resume()
+            
+            # 🔧 新增：设置WandB同步管理器运行
+            logger.info("📝 Step 0.5: Setting up WandB sync manager run...")
+            self._setup_wandb_run()
 
             # 1. Setup model and tokenizer - 🔧 修复调用
             logger.info("📝 Step 1: Setting up model and tokenizer...")
@@ -583,9 +661,18 @@ class GRPOTrainingPipeline:
             logger.info("📝 Step 4: Creating GRPOTrainer...")
             from trl import GRPOTrainer
             
+            # 🔧 关键：禁用内置WandB，完全使用我们的同步回调
+            grpo_cfg_copy = self.grpo_cfg
+            if "wandb" in grpo_cfg_copy.report_to:
+                # 创建一个不包含wandb的copy
+                import copy
+                grpo_cfg_copy = copy.deepcopy(self.grpo_cfg)
+                grpo_cfg_copy.report_to = [r for r in grpo_cfg_copy.report_to if r != "wandb"]
+                logger.info("🔧 禁用GRPOTrainer内置WandB报告，使用同步回调")
+            
             self.trainer = GRPOTrainer(
                 model=self.model,
-                args=self.grpo_cfg,
+                args=grpo_cfg_copy,
                 train_dataset=dataset_for_trainer,
                 reward_funcs=[self.get_reward_function()],
                 callbacks=self.callbacks
@@ -647,12 +734,21 @@ class GRPOTrainingPipeline:
         try:
             logger.info("🧹 Cleaning up resources...")
             
-            # Clear GPU memory
+            # 1. 清理WandB同步管理器
+            try:
+                sync_manager = get_wandb_sync_manager()
+                if sync_manager:
+                    sync_manager.finish()
+                    logger.info("✅ WandB同步管理器已清理")
+            except Exception as e:
+                logger.warning(f"⚠️ WandB同步管理器清理失败: {e}")
+            
+            # 2. Clear GPU memory
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 logger.info("✅ GPU cache cleared.")
             
-            # Force garbage collection
+            # 3. Force garbage collection
             gc.collect()
             logger.info("✅ Garbage collection completed.")
             
