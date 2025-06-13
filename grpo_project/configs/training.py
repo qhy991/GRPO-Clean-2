@@ -34,7 +34,16 @@ class ScriptConfig:
         metadata={"help": "List of modules to target for LoRA in GRPO stage."}
     )
 
+    # 🔧 新增：独立的长度配置参数
     max_seq_length: int = field(default=4096, metadata={"help": "Maximum sequence length for tokenizer and model."})
+    script_max_prompt_length: int = field(default=1536, metadata={"help": "Maximum length for input prompts. Default: 1536 tokens (~37.5% of total sequence)."})
+    script_max_completion_length: int = field(default=2560, metadata={"help": "Maximum length for model completions/outputs. Default: 2560 tokens (~62.5% of total sequence)."})
+    
+    # 🔧 新增：长度配置策略
+    length_allocation_strategy: str = field(
+        default="custom", 
+        metadata={"help": "Length allocation strategy: 'balanced' (50/50), 'prompt_heavy' (60/40), 'completion_heavy' (40/60), 'custom' (use script_max_prompt_length and script_max_completion_length directly)"}
+    )
 
     # Enhanced callback config
     callback_num_samples: int = field(default=3, metadata={"help": "Number of samples to generate in InferenceCallback."})
@@ -59,8 +68,8 @@ class ScriptConfig:
         metadata={"help": "Complexity emphasis: 'simple', 'balanced', 'complex'"}
     )
     curriculum_performance_check_interval: int = field(
-        default=25,
-        metadata={"help": "How many steps between performance checks for curriculum advancement. Lower values (10) = more frequent checks, higher values (50) = less frequent checks."}
+        default=5,
+        metadata={"help": "How many steps between performance checks for curriculum advancement. Lower values (5) = more frequent checks, higher values (25) = less frequent checks."}
     )
 
     # Experience replay config
@@ -69,6 +78,25 @@ class ScriptConfig:
     replay_sample_ratio: float = field(default=0.2, metadata={"help": "Ratio of replay samples in each batch."})
 
     def __post_init__(self):
+        # 🔧 自动调整长度配置
+        if self.length_allocation_strategy != "custom":
+            if self.length_allocation_strategy == "balanced":
+                self.script_max_prompt_length = self.max_seq_length // 2
+                self.script_max_completion_length = self.max_seq_length // 2
+            elif self.length_allocation_strategy == "prompt_heavy":
+                self.script_max_prompt_length = int(self.max_seq_length * 0.6)
+                self.script_max_completion_length = self.max_seq_length - self.script_max_prompt_length
+            elif self.length_allocation_strategy == "completion_heavy":
+                self.script_max_prompt_length = int(self.max_seq_length * 0.4)
+                self.script_max_completion_length = self.max_seq_length - self.script_max_prompt_length
+        
+        # 🔧 验证长度配置
+        total_length = self.script_max_prompt_length + self.script_max_completion_length
+        if total_length > self.max_seq_length:
+            print(f"⚠️ 警告: prompt长度({self.script_max_prompt_length}) + completion长度({self.script_max_completion_length}) = {total_length} > 最大序列长度({self.max_seq_length})")
+            print(f"   自动调整completion长度为: {self.max_seq_length - self.script_max_prompt_length}")
+            self.script_max_completion_length = self.max_seq_length - self.script_max_prompt_length
+        
         # Note: output_dir is handled by GRPOConfig (TrainingArguments)
         # We'll access it via grpo_cfg.output_dir in the pipeline
         pass

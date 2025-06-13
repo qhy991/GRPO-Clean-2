@@ -24,10 +24,10 @@ class EnhancedCurriculumManager:
 
     def __init__(self, curriculum_stages: List[CurriculumStageConfig], dataset: Dataset):
         self.stage_progression_configs = {
-            0: {"performance_threshold": 0.7, "min_evaluations": 8, "stability_window": 4},
-            1: {"performance_threshold": 0.65, "min_evaluations": 10, "stability_window": 5},
-            2: {"performance_threshold": 0.6, "min_evaluations": 15, "stability_window": 6},
-            3: {"performance_threshold": 0.55, "min_evaluations": 20, "stability_window": 8, "max_stay_steps": 200}
+            0: {"performance_threshold": 0.65, "min_evaluations": 5, "stability_window": 2},
+            1: {"performance_threshold": 0.60, "min_evaluations": 5, "stability_window": 2},
+            2: {"performance_threshold": 0.55, "min_evaluations": 5, "stability_window": 2},
+            3: {"performance_threshold": 0.50, "min_evaluations": 5, "stability_window": 2, "max_stay_steps": 200}
         }
         self.curriculum_stages = curriculum_stages
         self.full_dataset = dataset
@@ -192,6 +192,7 @@ class FixedEnhancedCurriculumManager:
         self._log_debug(f"  - 当前性能: {recent_performance:.4f}")
         self._log_debug(f"  - 当前阶段: {self.current_stage}")
         self._log_debug(f"  - 历史长度: {len(self.stage_performance_history)}")
+        self._log_debug(f"  - 历史内容: {[f'{p:.4f}' for p in self.stage_performance_history[-5:]]}")  # 显示最近5次
         
         if self.current_stage >= len(self.curriculum_stages) - 1:
             self._log_debug("❌ 已在最后阶段，不能继续进阶")
@@ -209,7 +210,7 @@ class FixedEnhancedCurriculumManager:
             return False
         
         # 检查最近的性能表现
-        recent_window = min(3, len(self.stage_performance_history))
+        recent_window = min(2, len(self.stage_performance_history))
         recent_performances = self.stage_performance_history[-recent_window:]
         recent_avg = np.mean(recent_performances)
         

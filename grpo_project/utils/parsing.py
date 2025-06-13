@@ -1,3 +1,4 @@
+from .enhanced_parser import create_enhanced_parsing_function
 import re
 import logging
 from typing import Optional, Tuple, Dict, Any
@@ -652,3 +653,22 @@ def validate_and_fix_output_format(raw_output: str) -> Tuple[str, bool]:
                 needs_fix = True
     
     return raw_output.strip(), needs_fix
+
+# 使用增强的解析器
+_enhanced_parse_func, _enhanced_parser = create_enhanced_parsing_function()
+
+def parse_llm_completion_with_context_qwen3(completion_text: str, prompt: str = None,
+                                           step: int = None, sample_idx: int = None):
+    """使用增强解析器的Qwen3解析函数"""
+    return _enhanced_parse_func(completion_text, prompt, step, sample_idx)
+
+# 向后兼容
+parse_llm_completion_with_context = parse_llm_completion_with_context_qwen3
+
+def get_parsing_stats():
+    """获取解析统计信息"""
+    return _enhanced_parser.get_parsing_stats()
+
+def reset_parsing_stats():
+    """重置解析统计信息"""
+    _enhanced_parser.reset_stats()

@@ -17,14 +17,17 @@ try:
     from grpo_project.utils.parsing import parse_llm_completion_with_context, parse_llm_completion_qwen3
     from grpo_project.utils.verilog_utils import assess_code_quality
     from grpo_project.evaluation.simulator import VerilogSimulator # DetailedInferenceCallback uses run_iverilog_simulation
-    # ExperienceBuffer is currently in utils.py, will be moved later. For now, import from utils.
-    from grpo_project.utils import ExperienceBuffer # Updated import
+    # ExperienceBuffer is in replay_buffer.py
+    from grpo_project.utils.replay_buffer import ExperienceBuffer
     
     # 导入仿真函数
     from grpo_project.utils.simulation import run_iverilog_simulation
-except ImportError:
+    
+    # 导入成功标志
+    _imports_successful = True
+except ImportError as e:
     logger_init = logging.getLogger(__name__)
-    logger_init.warning("Callbacks.inference: Could not import from grpo_project or utils. Using placeholders.")
+    logger_init.warning(f"Callbacks.inference: Could not import from grpo_project or utils: {e}. Using placeholders.")
     from transformers import TrainerCallback as BaseCallback # Fallback
 
     class ExperienceBuffer: pass # Placeholder
@@ -40,6 +43,9 @@ except ImportError:
             return {"compilation_success": False, "simulation_run_success": False, "parsing_success": False,
                     "passed_tests": 0, "failed_tests": 0, "total_tests_in_output": 0,
                     "all_tests_passed_by_tb": False, "error_message": "Placeholder simulator not implemented"}
+    
+    # 导入失败标志
+    _imports_successful = False
 
 
 logger = logging.getLogger(__name__)
@@ -398,6 +404,20 @@ class Qwen3InferenceCallback(BaseCallback):
         pass
 
     def _generate_qwen3_sample(self, model, prompt, step) -> Dict[str, Any]:
+        # 记录解析统计信息
+        if step % 10 == 0:  # 每10步记录一次统计
+            try:
+                from ..utils.parsing import get_parsing_stats
+                parsing_stats = get_parsing_stats()
+                if parsing_stats['total_attempts'] > 0:
+                    print(f"\n📊 解析统计 (Step {step}):")
+                    print(f"  总尝试: {parsing_stats['total_attempts']}")
+                    print(f"  成功率: {parsing_stats.get('success_rate', 0):.2%}")
+                    print(f"  格式修复率: {parsing_stats.get('fix_rate', 0):.2%}")
+                    print(f"  应急提取率: {parsing_stats.get('emergency_rate', 0):.2%}")
+                    print(f"  失败率: {parsing_stats.get('failure_rate', 0):.2%}")
+            except Exception as e:
+                print(f"获取解析统计失败: {e}")
         # Content of _generate_qwen3_sample from utils.Qwen3InferenceCallback
         # Uses parse_llm_completion_qwen3
         return {"error": "Not implemented in stub"} # Placeholder

@@ -4,6 +4,93 @@ import os
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import numpy as np # Added for statistical calculations
+from ..configs.validation_config import ValidationConfig, DEFAULT_VALIDATION_CONFIG
+
+def extract_module_ports_with_types(verilog_file: str) -> tuple[str, list[dict]]:
+    """
+    从Verilog文件中提取模块名和端口信息（包括类型）
+    返回: (module_name, [{"name": "port_name", "type": "input/output/inout"}, ...])
+    """
+    logger = logging.getLogger(__name__)
+    
+    try:
+        if not os.path.exists(verilog_file):
+            logger.error(f"Verilog file not found: {verilog_file}")
+            return "", []
+
+        with open(verilog_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # 提取模块名 - 修复正则表达式，确保完整匹配模块名
+        # 使用更精确的模式，避免匹配到注释中的 "module" 关键字
+        # 修改：支持既有端口列表也有无端口列表的模块声明
+        module_match = re.search(r'^\s*module\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:#.*?)?\s*[\(;]', content, re.MULTILINE)
+        if not module_match:
+            # 备用模式：不要求在行首，同样支持括号或分号
+            module_match = re.search(r'\bmodule\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:#.*?)?\s*[\(;]', content)
+            if not module_match:
+                logger.error(f"No module declaration found in {verilog_file}")
+                return "", []
+        module_name = module_match.group(1)
+
+        # 提取端口信息（包括类型）
+        ports = []
+        
+        # 方法1: 从模块声明中提取端口 - 修复正则表达式以支持参数
+        port_pattern = r"module\s+" + re.escape(module_name) + r"\s*(?:#\s*\([^)]*\)\s*)?\((.*?)\)\s*;"
+        port_match = re.search(port_pattern, content, re.IGNORECASE | re.DOTALL)
+        
+        if port_match:
+            port_text = port_match.group(1)
+            # 清理注释
+            port_text = re.sub(r"//.*?(\n|$)", "\n", port_text)
+            port_text = re.sub(r"/\*.*?\*/", "", port_text, flags=re.DOTALL)
+            port_text = port_text.replace("\n", " ").strip()
+            
+            if port_text:
+                # 解析端口声明
+                port_declarations = [p.strip() for p in port_text.split(',') if p.strip()]
+                for port_decl in port_declarations:
+                    # 修复正则表达式以正确处理 reg 类型
+                    # 格式: input/output/inout [wire/reg] [位宽] 端口名
+                    type_match = re.search(r'\b(input|output|inout)\s+(?:wire\s+|reg\s+)?(?:\[[^\]]+\]\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*$', port_decl.strip(), re.IGNORECASE)
+                    if type_match:
+                        port_type = type_match.group(1).lower()
+                        port_name = type_match.group(2)
+                        ports.append({"name": port_name, "type": port_type})
+                    else:
+                        # 如果没有明确类型，尝试从端口名推断
+                        parts = port_decl.split()
+                        if parts:
+                            port_name = parts[-1].strip("(),;")
+                            if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", port_name):
+                                # 默认为input（这是一个合理的默认值）
+                                ports.append({"name": port_name, "type": "input"})
+
+        # 方法2: 如果方法1没有找到端口，尝试从独立的端口声明中提取
+        if not ports:
+            # 修复独立端口声明的正则表达式
+            port_decl_pattern = r'\b(input|output|inout)\s+(?:wire\s+|reg\s+)?(?:\[[^\]]+\]\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*;'
+            port_matches = re.findall(port_decl_pattern, content, re.IGNORECASE)
+            for port_type, port_name in port_matches:
+                ports.append({"name": port_name, "type": port_type.lower()})
+
+        # 去重并排序
+        unique_ports = []
+        seen_names = set()
+        for port in ports:
+            if port["name"] not in seen_names:
+                unique_ports.append(port)
+                seen_names.add(port["name"])
+        
+        unique_ports.sort(key=lambda x: x["name"])
+        
+        logger.debug(f"Extracted from {verilog_file}: module='{module_name}', ports={unique_ports}")
+        return module_name, unique_ports
+
+    except Exception as e:
+        logger.error(f"Error reading or parsing Verilog file {verilog_file}: {e}", exc_info=True)
+        return "", []
 
 # Attempt to import from grpo_project, fallback to local if not found
 try:
@@ -36,9 +123,91 @@ except ImportError:
         # Default get_scaled_reward
         def get_scaled_reward(self, base_reward: float, training_step: int = 0) -> float: return base_reward
 
+    # 添加ValidationConfig占位符
+    class ValidationConfig: # type: ignore
+        def __init__(self, **kwargs): pass
+        @classmethod
+        def create_flexible_config(cls): return cls()
+
     def extract_module_info(verilog_file: str) -> tuple[str, list[str]]: return "placeholder_module", []
-    def parse_llm_completion_qwen3(text: str, debug_prompt: Optional[str]=None, debug_context:Optional[Dict[str,Any]]=None) -> tuple[Optional[str], Optional[str]]: return "parsed_reasoning", "parsed_code"
-    def validate_verilog_code(code: str, name: str, ports: list) -> tuple[bool, str]: return True, ""
+
+    def parse_llm_completion_qwen3(text: str, debug_prompt: Optional[str]=None, debug_context:Optional[Dict[str,Any]]=None) -> tuple[Optional[str], Optional[str]]: 
+        # 增强的解析功能 - 处理各种畸形格式
+        import re
+        if not text or not isinstance(text, str):
+            return None, None
+        
+        text = text.strip()
+        reasoning_part = None
+        code_part = None
+        
+        try:
+            # 处理畸形的</think>标记（出现在代码块中的情况）
+            # 先清理掉错误位置的</think>标记
+            cleaned_text = re.sub(r'```verilog\s*</think>\s*\n', '```verilog\n', text, flags=re.IGNORECASE)
+            
+            # 提取<think>部分 - 更宽松的匹配
+            think_pattern = r'<think>(.*?)</think>'
+            think_match = re.search(think_pattern, cleaned_text, re.DOTALL | re.IGNORECASE)
+            if think_match:
+                reasoning_part = think_match.group(1).strip()
+                # 移除已匹配的think部分
+                text_without_think = cleaned_text[:think_match.start()] + cleaned_text[think_match.end():]
+            else:
+                # 如果没有完整的think标签，尝试匹配开始标签
+                think_start_pattern = r'<think>(.*?)(?=```verilog|$)'
+                think_start_match = re.search(think_start_pattern, cleaned_text, re.DOTALL | re.IGNORECASE)
+                if think_start_match:
+                    reasoning_part = think_start_match.group(1).strip()
+                    text_without_think = cleaned_text[think_start_match.end():]
+                else:
+                    text_without_think = cleaned_text
+            
+            # 查找Verilog代码块 - 处理重复的```verilog标记
+            # 先尝试标准的代码块格式
+            verilog_patterns = [
+                r'```verilog\s*(.*?)\s*```',  # 标准格式
+                r'```verilog\s*(module.*?endmodule)\s*```?',  # 以module开头的格式，可选结束```
+                r'(module\s+\w+.*?endmodule)',  # 直接的module...endmodule
+            ]
+            
+            for pattern in verilog_patterns:
+                code_match = re.search(pattern, text_without_think, re.DOTALL | re.IGNORECASE)
+                if code_match:
+                    code_part = code_match.group(1).strip()
+                    # 清理代码中可能残留的错误标记
+                    code_part = re.sub(r'</think>\s*\n?', '', code_part)
+                    code_part = re.sub(r'```verilog\s*\n?', '', code_part)
+                    code_part = code_part.strip()
+                    if code_part and 'module' in code_part:
+                        break
+            
+            # 如果仍然没有找到代码，尝试在原始文本中查找
+            if not code_part:
+                # 最后的努力：在整个文本中查找任何module...endmodule
+                fallback_pattern = r'(module\s+\w+.*?endmodule)'
+                fallback_match = re.search(fallback_pattern, text, re.DOTALL | re.IGNORECASE)
+                if fallback_match:
+                    code_part = fallback_match.group(1).strip()
+        
+        except Exception as e:
+            # 如果解析失败，记录错误但不抛出异常
+            if debug_context:
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Parse error in step {debug_context.get('step', 'unknown')}, sample {debug_context.get('sample_idx', 'unknown')}: {e}")
+        
+        # 验证提取的代码是否有效
+        if code_part and code_part.strip():
+            # 基本的验证：确保包含module和endmodule
+            if 'module' in code_part.lower() and 'endmodule' in code_part.lower():
+                return reasoning_part, code_part
+            else:
+                # 代码无效，返回None
+                return reasoning_part, None
+        
+        return reasoning_part, code_part
+    
+    def validate_verilog_code(code: str, name: str, ports: list, config=None) -> tuple[bool, str]: return True, ""
     def assess_code_quality(code: str) -> Dict[str, float]: return {"efficiency": 0.0, "readability": 0.0, "complexity": 0.0, "structure": 0.0} # Added assess_code_quality placeholder
     # Removed run_iverilog_simulation placeholder as it's no longer used
     
@@ -95,22 +264,18 @@ class RewardCalculator:
         current_unscaled_components = {"functional": 0.0, "efficiency": 0.0, "readability": 0.0, "robustness": 0.0, "base_compilation": 0.0}
         current_funnel_metrics = {"code_extracted": False, "compiled_successfully": False, "sim_ran_successfully": False, "passed_tests": -1}
 
+        # 从参考Verilog文件中提取模块信息
         module_name, req_ports = "", []
         if reference_verilog_path and os.path.exists(reference_verilog_path):
-            module_name, req_ports = extract_module_info(reference_verilog_path)
+            module_name, req_ports = extract_module_ports_with_types(reference_verilog_path)
 
         if not module_name:
-            logger.error(f"{log_pref}: Failed to extract module info from ref Verilog '{reference_verilog_path}'.")
-            error_reward_val = self.reward_config.get_scaled_reward(self.reward_config.compilation_failure * 2, training_step)
-            return {
-                "final_reward": error_reward_val,
-                "unscaled_components": {**current_unscaled_components, "base_compilation": self.reward_config.compilation_failure * 2},
-                "funnel_metrics": current_funnel_metrics
-            }
+            logger.warning(f"{log_pref}: Could not extract module name from reference Verilog file: {reference_verilog_path}")
+            module_name = "unknown_module"
 
-        _, code = parse_llm_completion_qwen3(completion_str, debug_prompt=prompt_str, debug_context={"step": training_step, "sample_idx": completion_idx})
+        reasoning_part, code_part = parse_llm_completion_qwen3(completion_str, debug_prompt=prompt_str, debug_context={"step": training_step, "sample_idx": completion_idx})
 
-        if code and code.strip():
+        if code_part and code_part.strip():
             current_funnel_metrics["code_extracted"] = True
         else:
             penalty_type = self.reward_config.missing_code_block_penalty
@@ -141,7 +306,7 @@ class RewardCalculator:
             }
 
         # Code Quality Assessment (Direct Integration)
-        quality_metrics = assess_code_quality(code)
+        quality_metrics = assess_code_quality(code_part)
         current_unscaled_components["efficiency"] = (
             quality_metrics.get("efficiency", 0) * self.reward_config.code_efficiency_bonus +
             quality_metrics.get("structure", 0) * self.reward_config.synthesis_friendly_bonus -
@@ -154,14 +319,28 @@ class RewardCalculator:
         # If a separate synthesis bonus affecting robustness is still needed, it should be added here.
         # For now, following the provided direct integration logic for efficiency and readability.
 
-        is_valid, err_msg = validate_verilog_code(code, module_name, req_ports)
+        # 验证Verilog代码
+        # 使用已提取的端口信息（包括类型）
+        if req_ports:
+            formatted_ports = req_ports  # req_ports 现在已经是正确的格式
+        else:
+            formatted_ports = []
+        
+        # 使用灵活的验证配置
+        validation_config = ValidationConfig.create_flexible_config()
+        is_valid, validation_error = validate_verilog_code(
+            code_part, 
+            module_name, 
+            formatted_ports, 
+            validation_config
+        )
 
         if is_valid:
             logger.debug(f"{log_pref}: Verilog validation SUCCEEDED.")
             current_funnel_metrics["compiled_successfully"] = True # Initial assumption, sim_res will confirm
 
             sim_res = self.simulator.run_simulation(
-                generated_verilog_code=code,
+                generated_verilog_code=code_part,
                 testbench_file_path=testbench_path, # Renamed from testbench_path
                 expected_total_tests_from_manifest=expected_total_tests, # Renamed from expected_total_tests
                 prompt_identifier=prompt_id_for_log,
@@ -215,7 +394,7 @@ class RewardCalculator:
         else: # is_valid is false
             current_unscaled_components["base_compilation"] = self.reward_config.compilation_failure
             # current_funnel_metrics["compiled_successfully"] is already False by default
-            logger.info(f"{log_pref}: Verilog validation FAILED. Error: {err_msg}")
+            logger.info(f"{log_pref}: Verilog validation FAILED. Error: {validation_error}")
             # Save debug info for validation failure - 保存到子文件夹
             if output_dir_for_debug:
                 # 创建验证错误文件的子目录
@@ -227,8 +406,8 @@ class RewardCalculator:
                     with open(debug_filename, "w") as f:
                         f.write(f"// Prompt ID: {prompt_id_for_log}\n")
                         f.write(f"// Completion Index: {completion_idx}\n")
-                        f.write(f"// Validation Error: {err_msg}\n\n")
-                        f.write(code)
+                        f.write(f"// Validation Error: {validation_error}\n\n")
+                        f.write(code_part)
                     logger.debug(f"{log_pref}: Saved Verilog with validation error to {debug_filename}")
                 except Exception as e:
                     logger.error(f"{log_pref}: Failed to save Verilog with validation error: {e}")
@@ -262,7 +441,7 @@ class RewardCalculator:
             "final_reward": final_scaled_reward,
             "unscaled_components": current_unscaled_components,
             "funnel_metrics": current_funnel_metrics,
-            "raw_code": code
+            "raw_code": code_part
         }
 
     def calculate_batch_rewards(

@@ -24,8 +24,8 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["basic"],
             complexity_range=(0.0, 3.0),
             epochs_ratio=0.25,
-            performance_threshold=0.7,
-            min_evaluations=10,
+            performance_threshold=0.65,
+            min_evaluations=3,
             description="基础阶段：学习简单的基础级设计"
         ),
         CurriculumStageConfig(
@@ -33,8 +33,8 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["basic", "intermediate"],
             complexity_range=(0.0, 5.0),
             epochs_ratio=0.25,
-            performance_threshold=0.65,
-            min_evaluations=10,
+            performance_threshold=0.60,
+            min_evaluations=5,
             description="初级阶段：基础级+简单中级设计"
         ),
         CurriculumStageConfig(
@@ -42,8 +42,8 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["intermediate"],
             complexity_range=(3.0, 7.0),
             epochs_ratio=0.25,
-            performance_threshold=0.6,
-            min_evaluations=10,
+            performance_threshold=0.55,
+            min_evaluations=5,
             description="中级阶段：中等复杂度的中级设计"
         ),
         CurriculumStageConfig(
@@ -51,8 +51,8 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["intermediate", "advanced"],
             complexity_range=(5.0, 9.0),
             epochs_ratio=0.15,
-            performance_threshold=0.55,
-            min_evaluations=10,
+            performance_threshold=0.50,
+            min_evaluations=5,
             description="高级阶段：复杂的中级和高级设计"
         ),
         CurriculumStageConfig(
@@ -60,8 +60,8 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["advanced", "expert"],
             complexity_range=(7.0, 10.0),
             epochs_ratio=0.1,
-            performance_threshold=0.5,
-            min_evaluations=10,
+            performance_threshold=0.45,
+            min_evaluations=5,
             description="专家阶段：最复杂的高级和专家级设计"
         )
     ]
@@ -94,8 +94,8 @@ def create_custom_curriculum_stages(
             dataset_levels=["basic"],
             complexity_range=complexity_ranges[0],
             epochs_ratio=0.3,
-            performance_threshold=0.7,
-            min_evaluations=10,
+            performance_threshold=0.65,
+            min_evaluations=5,
             description="Custom: 基础阶段"
         ))
 
@@ -107,7 +107,7 @@ def create_custom_curriculum_stages(
             complexity_range=complexity_ranges[1 if "basic" in focus_levels else 2],
             epochs_ratio=0.25,
             performance_threshold=0.65,
-            min_evaluations=10,
+            min_evaluations=5,
             description="Custom: 初级到中级过渡"
         ))
         if "basic" not in focus_levels: # If only intermediate, add a dedicated intermediate stage
@@ -117,7 +117,7 @@ def create_custom_curriculum_stages(
                 complexity_range=complexity_ranges[2],
                 epochs_ratio=0.20,
                 performance_threshold=0.6,
-                min_evaluations=10,
+                min_evaluations=5,
                 description="Custom: 中级核心"
             ))
 
@@ -130,7 +130,7 @@ def create_custom_curriculum_stages(
             complexity_range=complexity_ranges[3],
             epochs_ratio=0.15,
             performance_threshold=0.55,
-            min_evaluations=10,
+            min_evaluations=5,
             description="Custom: 高级阶段"
         ))
 
@@ -142,7 +142,7 @@ def create_custom_curriculum_stages(
             complexity_range=complexity_ranges[4],
             epochs_ratio=0.10,
             performance_threshold=0.5,
-            min_evaluations=10,
+            min_evaluations=5,
             description="Custom: 专家阶段"
         ))
 
@@ -154,7 +154,7 @@ def create_custom_curriculum_stages(
             complexity_range=(0.0, 10.0),
             epochs_ratio=1.0,
             performance_threshold=0.6,
-            min_evaluations=10,
+            min_evaluations=5,
             description="Default stage covering all specified levels and full complexity range."
         ))
 

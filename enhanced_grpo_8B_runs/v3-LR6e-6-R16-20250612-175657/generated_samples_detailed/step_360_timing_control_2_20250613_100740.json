@@ -1,0 +1,36 @@
+{
+  "step": 360,
+  "timestamp_iso": "2025-06-13T10:07:40.743487",
+  "dataset_original_sample_info": {
+    "level": "intermediate",
+    "complexity_score": 5.98,
+    "original_problem_desc_for_debug": "Design a Verilog module and a comprehensive testbench for a timing_control_2 based on the provided reference files. The module should correctly implement the implied functionality and pass all test cases in the testbench.",
+    "testbench_path": "/home/qhy/Research/LLM/GRPO-RV/dataset/I/testbenches/timing_control_2_testbench.v",
+    "task_id": "timing_control_2"
+  },
+  "model_input_prompt_preview": "<|im_start|>system\nYou are a Verilog expert. Please provide your solution in the following strict format:\n\n<think>\nYour detailed analysis and thinking process here\n</think>\n\n```verilog\nYour complete Verilog module code here\n```\n\nRequirements:\n- The <think> section must contain your reasoning\n- The `...",
+  "generated_result": {
+    "reasoning": "<think>\n</think>\n\nI need to design a",
+    "code": "module timing_control (\n    input wire clk_in,\n    input wire reset,\n    input wire ctrl_in,\n    output reg clk_out,\n    output reg ctrl_out,\n    input wire [7:0] data_in,\n    output reg [7:0] data_out\n);\n\n// State definitions\nlocalparam IDLE = 2'b00;\nlocalparam ACTIVE = 2'b01;\nlocalparam HOLD = 2'b10;\n\nreg [1:0] current_state, next_state;\ninteger counter;\n\nalways @(posedge clk_in or posedge reset) begin\n    if (reset) begin\n        current_state <= IDLE;\n        clk_out <= 0;\n        ctrl_out <= 0;\n        data_out <= 8'b0;\n        counter <= 0;\n    end else begin\n        current_state <= next_state;\n        \n        case (current_state)\n            IDLE: begin\n                clk_out <= 0;\n                ctrl_out <= 0;\n                data_out <= 8'b0;\n                if (ctrl_in) begin\n                    next_state <= ACTIVE;\n                end\n            end\n            \n            ACTIVE: begin\n                clk_out <= ~clk_out; // Toggle clock output\n                ctrl_out <= 1;\n                data_out <= data_in; // Pass through input data\n                if (counter == 5) begin\n                    next_state <= HOLD;\n                    counter <= 0;\n                end else begin\n                    counter <= counter + 1;\n                end\n            end\n            \n            HOLD: begin\n                clk_out <= 0; // Maintain low after last toggle\n                ctrl_out <= 1;\n                data_out <= data_in; // Continue passing through data\n                if (!ctrl_in) begin\n                    next_state <= IDLE;\n                end\n            end\n            \n            default: next_state <= IDLE;\n        endcase\n    end\nend\n\nendmodule",
+    "raw_output_preview": "<think>\n</think>\n\nI need to design a module named timing_control that controls timing signals based on control inputs. I'll create a simple state machine with states for idle, active, and hold. \n\nStep 1: Define the module interface with clock, reset, control inputs, and outputs\nStep 2: Create regist...",
+    "generation_time_seconds": 62.72271227836609
+  },
+  "simulation_details": {
+    "compilation_success": true,
+    "simulation_run_success": true,
+    "parsing_success": true,
+    "passed_tests": 2,
+    "failed_tests": 6,
+    "total_tests_in_output": 8,
+    "all_tests_passed_by_tb": false,
+    "error_message": null,
+    "raw_stdout": "IVERILOG COMPILE STDOUT:\n\n\nVVP SIMULATION STDOUT:\nTest Case 1: PASS\nTest Case 0: FAIL - Expected {D:aa, CLK:1, CTRL:0}, Got {D:00, CLK:0, CTRL:0}\nTest Case 1: FAIL - Expected {D:aa, CLK:1, CTRL:1}, Got {D:00, CLK:0, CTRL:0}\nTest Case 0: FAIL - Expected {D:55, CLK:1, CTRL:1}, Got {D:00, CLK:0, CTRL:0}\nTest Case 5: FAIL - CLK_OUT dropped during low phase\nTest Case 0: PASS\nTest Case 1: FAIL - Expected {D:ff, CLK:1, CTRL:0}, Got {D:00, CLK:0, CTRL:0}\nTest Case 0: FAIL - Expected {D:0f, CLK:1, CTRL:1}, Got {D:00, CLK:0, CTRL:0}\n--------------------------------SUMMARY--------------------------------\nPassed: 2, Failed: 6\nTotal Test Cases: 8\nRatio: 2/8\nOVERALL_FAIL\n-----------------------------------------------------------------------\n/home/qhy/Research/LLM/GRPO-RV/dataset/I/testbenches/timing_control_2_testbench.v:120: $finish called at 76 (1s)\n\n",
+    "raw_stderr": "IVERILOG COMPILE STDERR:\n\nVVP SIMULATION STDERR:\n\n",
+    "quality_metrics": {
+      "complexity": 0.4,
+      "readability": 0.47543859649122805,
+      "efficiency": 0.7,
+      "structure": 1.0
+    }
+  }
+}
