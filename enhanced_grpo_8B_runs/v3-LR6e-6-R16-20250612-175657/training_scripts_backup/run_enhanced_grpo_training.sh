@@ -227,9 +227,10 @@ DATASET_BASE_PATH=$(dirname "${DATASET_PATH}")
 
 # --- RESUME FROM CHECKPOINT CONFIGURATION ---
 # 🔄 设置此变量为你想要从中恢复的 checkpoint 目录的路径
-# 例如: RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-340"
+# 例如: RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-540"
 # 将此留空以开始新的训练。将其设置为一个不存在的路径也会开始新的训练（会有警告）。
-RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-340"
+RESUME_FROM_CHECKPOINT_DIR=
+# "/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-540"
 # "/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_v3_runs/v3-LR6e-6-R32-20250612-124352/checkpoint-20"
 # "/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_v3_runs/v3-LR6e-6-R32-20250611-155656/checkpoint-60"
 # "/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_v3_runs/v3-LR6e-6-R64-20250609-100431/checkpoint-1030"
@@ -365,7 +366,7 @@ if [ -n "${RESUME_FROM_CHECKPOINT_DIR}" ]; then
         
     else
         echo "⚠️ 警告: RESUME_FROM_CHECKPOINT_DIR ('${RESUME_FROM_CHECKPOINT_DIR}') 指定的目录不存在。将开始新的训练，并忽略此设置。"
-        # RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-340" # 清空以避免传递无效路径给Python脚本
+        # RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-540" # 清空以避免传递无效路径给Python脚本
         # 确保不设置恢复相关的环境变量
         unset WANDB_RUN_ID
         unset WANDB_RESUME
@@ -801,7 +802,7 @@ WANDB_RUN_NAME="${WANDB_RUN_NAME}"
 WANDB_STEP_FIX_ENABLED="${WANDB_STEP_FIX_ENABLED}"
 
 ## Resume Configuration
-RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-340"
+RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-540"
 
 ## Runtime Information
 TIMESTAMP=${TIMESTAMP}
@@ -1232,6 +1233,6 @@ exit ${status}
 #
 # ====================================================================
 
-RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-340"
+RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-540"
 
-RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-340"
+RESUME_FROM_CHECKPOINT_DIR="/home/qhy/Research/LLM/GRPO-Clean-2/enhanced_grpo_8B_runs/v3-LR6e-6-R16-20250612-175657/checkpoint-540"

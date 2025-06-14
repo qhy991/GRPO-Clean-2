@@ -310,6 +310,28 @@ class DetailedInferenceCallback(BaseCallback):
                 sample_idx=0 # Assuming this callback processes one sample at a time for this method
             )
 
+            # --- 推理内容为空时自动补全 ---
+            if not reasoning or len(reasoning.strip()) < 10 or reasoning.lower().startswith(("well", "i will", "let's", "no reasoning")):
+                guide = "First, analyze the input signals and module functionality. The reasoning process is as follows: "
+                think_start = prompt.find("<think>")
+                if think_start != -1:
+                    new_prompt = prompt[:think_start+len("<think>")] + "\n" + guide
+                    # 只生成推理部分
+                    inputs_fix = self.tokenizer(new_prompt, return_tensors="pt", truncation=True, max_length=max_prompt_len).to(model.device)
+                    with torch.no_grad():
+                        outputs_fix = model.generate(
+                            **inputs_fix,
+                            max_new_tokens=128,  # 只生成推理部分
+                            do_sample=True,
+                            temperature=0.8,
+                            top_p=0.95,
+                            repetition_penalty=1.1,
+                            pad_token_id=self.tokenizer.pad_token_id
+                        )
+                    generated_tokens_fix = outputs_fix[0][inputs_fix.input_ids.shape[1]:]
+                    reasoning_fix = self.tokenizer.decode(generated_tokens_fix, skip_special_tokens=True)
+                    reasoning = guide + reasoning_fix.strip()
+
             return {
                 'reasoning': reasoning if reasoning is not None else "PARSING_FAILED_REASONING",
                 'code': code if code is not None else "PARSING_FAILED_CODE",
