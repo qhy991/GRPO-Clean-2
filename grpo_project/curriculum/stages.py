@@ -17,16 +17,61 @@ class CurriculumStageConfig:
     min_evaluations: int = 5           # 最少评估次数
     description: str = ""              # 阶段描述
 
-def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
-    """创建默认的双层课程学习阶段"""
+def create_default_curriculum_stages(
+    performance_thresholds: Optional[List[float]] = None,
+    min_evaluations: int = 5
+) -> List[CurriculumStageConfig]:
+    """创建默认的双层课程学习阶段
+    
+    Args:
+        performance_thresholds: 五个阶段的性能阈值列表 [foundation, elementary, intermediate, advanced, expert]
+        min_evaluations: 最小评估次数
+    """
+    # 🔧 优先从环境变量读取阈值
+    env_thresholds = []
+    for i in range(1, 6):  # 阶段1-5
+        env_key = f"CURRICULUM_PERFORMANCE_THRESHOLD_{i}"
+        env_value = os.environ.get(env_key)
+        if env_value:
+            try:
+                env_thresholds.append(float(env_value))
+                logger.info(f"📊 从环境变量读取阈值: {env_key}={env_value}")
+            except ValueError:
+                logger.warning(f"⚠️ 环境变量 {env_key} 值无效: {env_value}, 忽略")
+    
+    # 从环境变量读取最小评估次数
+    env_min_eval = os.environ.get("CURRICULUM_MIN_EVALUATIONS")
+    if env_min_eval:
+        try:
+            min_evaluations = int(env_min_eval)
+            logger.info(f"📊 从环境变量读取最小评估次数: CURRICULUM_MIN_EVALUATIONS={env_min_eval}")
+        except ValueError:
+            logger.warning(f"⚠️ 环境变量 CURRICULUM_MIN_EVALUATIONS 值无效: {env_min_eval}, 使用默认值")
+    
+    # 优先级：环境变量 > 函数参数 > 默认值
+    if env_thresholds and len(env_thresholds) >= 5:
+        performance_thresholds = env_thresholds[:5]
+        logger.info(f"✅ 使用环境变量中的性能阈值: {performance_thresholds}")
+    elif performance_thresholds is None:
+        performance_thresholds = [0.65, 0.60, 0.55, 0.50, 0.45]
+        logger.info(f"📊 使用默认性能阈值: {performance_thresholds}")
+    else:
+        logger.info(f"📊 使用函数参数中的性能阈值: {performance_thresholds}")
+    
+    # 确保有足够的阈值
+    if len(performance_thresholds) < 5:
+        logger.warning(f"提供的阈值数量不足({len(performance_thresholds)})，使用默认值补充")
+        default_thresholds = [0.65, 0.60, 0.55, 0.50, 0.45]
+        performance_thresholds.extend(default_thresholds[len(performance_thresholds):])
+    
     stages = [
         CurriculumStageConfig(
             name="foundation",
             dataset_levels=["basic"],
             complexity_range=(0.0, 3.0),
             epochs_ratio=0.25,
-            performance_threshold=0.65,
-            min_evaluations=3,
+            performance_threshold=performance_thresholds[0],
+            min_evaluations=min_evaluations,
             description="基础阶段：学习简单的基础级设计"
         ),
         CurriculumStageConfig(
@@ -34,8 +79,8 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["basic", "intermediate"],
             complexity_range=(0.0, 5.0),
             epochs_ratio=0.25,
-            performance_threshold=0.60,
-            min_evaluations=5,
+            performance_threshold=performance_thresholds[1],
+            min_evaluations=min_evaluations,
             description="初级阶段：基础级+简单中级设计"
         ),
         CurriculumStageConfig(
@@ -43,8 +88,8 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["intermediate"],
             complexity_range=(3.0, 7.0),
             epochs_ratio=0.25,
-            performance_threshold=0.55,
-            min_evaluations=5,
+            performance_threshold=performance_thresholds[2],
+            min_evaluations=min_evaluations,
             description="中级阶段：中等复杂度的中级设计"
         ),
         CurriculumStageConfig(
@@ -52,8 +97,8 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["intermediate", "advanced"],
             complexity_range=(5.0, 9.0),
             epochs_ratio=0.15,
-            performance_threshold=0.50,
-            min_evaluations=5,
+            performance_threshold=performance_thresholds[3],
+            min_evaluations=min_evaluations,
             description="高级阶段：复杂的中级和高级设计"
         ),
         CurriculumStageConfig(
@@ -61,11 +106,13 @@ def create_default_curriculum_stages() -> List[CurriculumStageConfig]:
             dataset_levels=["advanced", "expert"],
             complexity_range=(7.0, 10.0),
             epochs_ratio=0.1,
-            performance_threshold=0.45,
-            min_evaluations=5,
+            performance_threshold=performance_thresholds[4],
+            min_evaluations=min_evaluations,
             description="专家阶段：最复杂的高级和专家级设计"
         )
     ]
+    
+    logger.info(f"创建了 {len(stages)} 个课程阶段，性能阈值: {performance_thresholds[:5]}")
     return stages
 
 def create_custom_curriculum_stages(

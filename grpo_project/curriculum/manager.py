@@ -734,7 +734,33 @@ def setup_fixed_curriculum_manager(script_cfg: ScriptConfig, dataset: Dataset) -
     if not stages:
         logger.info("No stages from custom creation or it failed. Falling back to create_default_curriculum_stages.")
         try:
-            stages = create_default_curriculum_stages() # from .stages
+            # 🔧 NEW: 传递ScriptConfig中的阈值参数到create_default_curriculum_stages
+            performance_thresholds = []
+            for i in range(1, 6):
+                threshold_attr = f"curriculum_performance_threshold_{i}"
+                if hasattr(script_cfg, threshold_attr):
+                    threshold_value = getattr(script_cfg, threshold_attr)
+                    if threshold_value is not None:
+                        performance_thresholds.append(threshold_value)
+                        logger.info(f"📊 从ScriptConfig读取阈值: {threshold_attr}={threshold_value}")
+            
+            min_evaluations = 5  # 默认值
+            if hasattr(script_cfg, 'curriculum_min_evaluations') and script_cfg.curriculum_min_evaluations is not None:
+                min_evaluations = script_cfg.curriculum_min_evaluations
+                logger.info(f"📊 从ScriptConfig读取最小评估次数: curriculum_min_evaluations={min_evaluations}")
+            
+            # 如果从ScriptConfig中获取了完整的阈值，就使用它们
+            if len(performance_thresholds) >= 5:
+                stages = create_default_curriculum_stages(
+                    performance_thresholds=performance_thresholds[:5],
+                    min_evaluations=min_evaluations
+                )
+                logger.info(f"✅ 使用ScriptConfig中的阈值创建课程阶段: {performance_thresholds[:5]}")
+            else:
+                # 否则使用默认的，但仍然传递环境变量或其他可用的参数
+                stages = create_default_curriculum_stages(min_evaluations=min_evaluations)
+                logger.info(f"✅ 使用默认阈值创建课程阶段（最小评估次数: {min_evaluations}）")
+            
             if stages:
                 logger.info(f"✅ Successfully created {len(stages)} default stages.")
             else:

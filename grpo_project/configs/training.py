@@ -78,6 +78,32 @@ class ScriptConfig:
         metadata={"help": "How many steps between performance checks for curriculum advancement. Lower values (5) = more frequent checks, higher values (25) = less frequent checks."}
     )
 
+    # 🔧 新增：课程学习性能阈值参数
+    curriculum_performance_threshold_1: Optional[float] = field(
+        default=None,
+        metadata={"help": "Performance threshold for curriculum stage 1 (foundation). If None, will use default from stage config."}
+    )
+    curriculum_performance_threshold_2: Optional[float] = field(
+        default=None,
+        metadata={"help": "Performance threshold for curriculum stage 2 (elementary). If None, will use default from stage config."}
+    )
+    curriculum_performance_threshold_3: Optional[float] = field(
+        default=None,
+        metadata={"help": "Performance threshold for curriculum stage 3 (intermediate). If None, will use default from stage config."}
+    )
+    curriculum_performance_threshold_4: Optional[float] = field(
+        default=None,
+        metadata={"help": "Performance threshold for curriculum stage 4 (advanced). If None, will use default from stage config."}
+    )
+    curriculum_performance_threshold_5: Optional[float] = field(
+        default=None,
+        metadata={"help": "Performance threshold for curriculum stage 5 (expert). If None, will use default from stage config."}
+    )
+    curriculum_min_evaluations: Optional[int] = field(
+        default=None,
+        metadata={"help": "Minimum number of evaluations required before advancing to next curriculum stage. If None, will use default from stage config."}
+    )
+
     # Experience replay config
     enable_experience_replay: bool = field(default=True, metadata={"help": "Enable experience replay buffer."})
     experience_buffer_size: int = field(default=1000, metadata={"help": "Size of experience replay buffer."})

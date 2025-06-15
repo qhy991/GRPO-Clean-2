@@ -5,15 +5,6 @@
 set -e
 export CUDA_VISIBLE_DEVICES=0,1
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
-# 🔧 NCCL优化设置 - 解决分布式训练超时问题
-export NCCL_TIMEOUT=7200           # 增加超时到2小时 (默认30分钟)
-export NCCL_IB_DISABLE=1           # 禁用InfiniBand（如果有连接问题）
-export NCCL_P2P_DISABLE=1          # 禁用P2P通信（如果有GPU通信问题）
-export NCCL_DEBUG=INFO             # 启用详细调试信息
-export NCCL_BLOCKING_WAIT=1        # 使用阻塞等待，更稳定
-export NCCL_ASYNC_ERROR_HANDLING=1 # 启用异步错误处理
-export TORCH_NCCL_TRACE_BUFFER_SIZE=8192  # 启用NCCL追踪缓冲区
 # --- Get the directory where the script is located ---
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PYTHON_EXECUTABLE="python3"
@@ -413,13 +404,13 @@ LORA_DROPOUT=0.05
 LORA_TARGET_MODULES="q_proj k_proj v_proj o_proj gate_proj up_proj down_proj"
 
 # 🔧 新增：独立的长度配置参数
-# 总序列长度 - 🔧 临时降低以减少内存压力和通信开销
-MAX_SEQ_LENGTH=4096       # 从5120降低到4096
+# 总序列长度（不变）
+MAX_SEQ_LENGTH=5120
 
 # 🔧 独立配置prompt和completion长度
 # 可以根据需要调整这些值
-MAX_PROMPT_LENGTH=1024    # 提示的最大长度 (保持不变)
-MAX_COMPLETION_LENGTH=3072 # 输出的最大长度 (从4096降低到3072)
+MAX_PROMPT_LENGTH=1024    # 提示的最大长度 (默认: ~37.5%的总长度)
+MAX_COMPLETION_LENGTH=4096 # 输出的最大长度 (默认: ~62.5%的总长度)
 
 # 🔧 长度分配策略选择
 # 选项: "balanced" (50/50), "prompt_heavy" (60/40), "completion_heavy" (40/60), "custom" (使用上面的自定义值)
@@ -545,7 +536,7 @@ REPLAY_SAMPLE_RATIO=0.2
 
 # --- Enhanced Training Configuration ---
 PER_DEVICE_TRAIN_BATCH_SIZE=1
-GRADIENT_ACCUMULATION_STEPS=8    # 🔧 减少梯度累积步数，降低内存压力
+GRADIENT_ACCUMULATION_STEPS=16
 LEARNING_RATE=6e-6               # More conservative
 NUM_TRAIN_EPOCHS=4
 MAX_STEPS=-1
@@ -553,10 +544,10 @@ WARMUP_RATIO=0.15                # Increased warmup
 LR_SCHEDULER_TYPE="cosine"
 WEIGHT_DECAY=0.01
 LOGGING_STRATEGY="steps"
-LOGGING_STEPS=5                  # 🔧 减少日志频率，降低通信开销
+LOGGING_STEPS=2
 SAVE_STRATEGY="steps"
-SAVE_STEPS=20                    # 🔧 减少保存频率，降低I/O压力
-SAVE_TOTAL_LIMIT=3               # 🔧 减少保存的checkpoint数量
+SAVE_STEPS=10
+SAVE_TOTAL_LIMIT=5
 SEED=42
 
 # --- Enhanced GRPO Configuration ---
@@ -1143,41 +1134,13 @@ backup_scripts_to_model_dir() {
 backup_scripts_to_model_dir &
 BACKUP_PID=$!
 
-# --- Pre-training Diagnostics ---
-echo ""
-echo "🔍 分布式训练诊断检查..."
-echo "GPU信息:"
-nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv,noheader,nounits
-echo ""
-echo "NCCL环境变量:"
-echo "  NCCL_TIMEOUT: ${NCCL_TIMEOUT}"
-echo "  NCCL_DEBUG: ${NCCL_DEBUG}"
-echo "  NCCL_BLOCKING_WAIT: ${NCCL_BLOCKING_WAIT}"
-echo ""
-
 # --- Execute Training ---
 echo "Starting enhanced GRPO v2 training at $(date)..."
 
-# Trap to handle interruption and cleanup
-cleanup_on_exit() {
-    echo ""
-    echo "🛑 训练中断或完成，执行清理..."
-    echo "最终GPU状态:"
-    nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv,noheader,nounits
-    echo "训练结束时间: $(date)"
-}
-trap cleanup_on_exit INT TERM EXIT
+# Trap to handle interruption
+trap 'echo "Training interrupted at $(date). Cleaning up..."; exit 130' INT TERM
 
-# 🔧 使用timeout命令限制训练时间，防止无限挂起
-timeout 7200 eval "${FULL_CMD}" || {
-    exit_code=$?
-    if [ $exit_code -eq 124 ]; then
-        echo "⏰ 训练因超时（2小时）而停止"
-    else
-        echo "❌ 训练因错误而停止 (退出码: $exit_code)"
-    fi
-    exit $exit_code
-}
+eval "${FULL_CMD}"
 
 status=$?
 
