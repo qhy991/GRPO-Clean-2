@@ -118,7 +118,10 @@ class FixedEnhancedCurriculumManager:
             self._log_debug(f"    - 性能阈值: {stage.performance_threshold}")
             self._log_debug(f"    - 最小评估: {stage.min_evaluations}")
         
-        self._analyze_dataset_distribution()
+        # Analyze dataset distribution using the static method
+        self.dataset_distribution = FixedEnhancedCurriculumManager._calculate_dataset_distribution(self.full_dataset, self._log_debug)
+        self._log_detailed_distribution() # New method to keep __init__ cleaner
+
         self._validate_curriculum_design()
         
         # 验证当前阶段数据集
@@ -137,8 +140,28 @@ class FixedEnhancedCurriculumManager:
             self._log_debug(f"⚠️ 未覆盖的数据集等级: {uncovered_levels}")
         
         total_ratio = sum(stage.epochs_ratio for stage in self.curriculum_stages)
-        if abs(total_ratio - 1.0) > 0.01:
+        # Ensure epochs_ratio exists and is a float, provide default if not
+        total_ratio = sum(getattr(stage, 'epochs_ratio', 0.0) for stage in self.curriculum_stages)
+
+        if abs(total_ratio - 1.0) > 0.01: # Assuming a default of 0.0 if attribute missing
             self._log_debug(f"⚠️ Epoch比例总和: {total_ratio:.3f} (应该接近1.0)")
+
+    def _log_detailed_distribution(self):
+        """Logs the detailed dataset distribution after analysis."""
+        if not self.dataset_distribution or not self.dataset_distribution.get('total_samples'):
+            self._log_debug("Dataset distribution is empty or invalid after calculation.")
+            return
+
+        self._log_debug(f"数据集分布分析 - 总样本: {self.dataset_distribution['total_samples']}")
+        for level, count in self.dataset_distribution['level_counts'].items():
+            if level in self.dataset_distribution['complexity_by_level'] and self.dataset_distribution['complexity_by_level'][level]:
+                avg_complexity = np.mean(self.dataset_distribution['complexity_by_level'][level])
+                complexity_range_actual = (np.min(self.dataset_distribution['complexity_by_level'][level]), np.max(self.dataset_distribution['complexity_by_level'][level]))
+                self._log_debug(f"  {level}: {count}样本, 平均复杂度: {avg_complexity:.2f}, 范围: {complexity_range_actual}")
+            else:
+                self._log_debug(f"  {level}: {count}样本, 无复杂度信息")
+
+
     def _log_debug(self, message: str):
         """记录调试信息 - 增强版本"""
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -151,38 +174,43 @@ class FixedEnhancedCurriculumManager:
         # 🔧 额外：每100条调试日志输出一次统计
         if len(self.debug_log) % 100 == 0:
             logger.info(f"📊 课程调试统计: {len(self.debug_log)} 条日志, 当前阶段={self.current_stage}")
-    def _analyze_dataset_distribution(self):
-        """分析数据集的等级和复杂度分布"""
-        if len(self.full_dataset) == 0:
-            self._log_debug("❌ 空数据集")
-            return
+
+    @staticmethod
+    def _calculate_dataset_distribution(dataset: Dataset, log_fn=None) -> Dict[str, Any]:
+        """
+        Calculates and returns the dataset distribution.
+        Can be used statically. If log_fn is provided, it will log messages.
+        """
+        if len(dataset) == 0:
+            if log_fn: log_fn("❌ _calculate_dataset_distribution: Empty dataset provided.")
+            return {'level_counts': {}, 'complexity_by_level': {}, 'total_samples': 0}
         
         level_counts = {}
         complexity_by_level = {}
         
-        for example in self.full_dataset:
+        for example in dataset:
             level = example.get('level', 'unknown').lower()
-            complexity = example.get('complexity_score', 5.0)
-            
+            # Ensuring complexity_score is float, default to 5.0 if missing or not convertible
+            try:
+                complexity = float(example.get('complexity_score', 5.0))
+            except (ValueError, TypeError):
+                complexity = 5.0
+
             level_counts[level] = level_counts.get(level, 0) + 1
             
             if level not in complexity_by_level:
                 complexity_by_level[level] = []
             complexity_by_level[level].append(complexity)
         
-        self.dataset_distribution = {
+        # The original _analyze_dataset_distribution logged details.
+        # This static version returns the raw data. Logging can be done by the caller.
+
+        return {
             'level_counts': level_counts,
-            'complexity_by_level': complexity_by_level,
-            'total_samples': len(self.full_dataset)
+            'complexity_by_level': complexity_by_level, # raw lists of complexities per level
+            'total_samples': len(dataset)
         }
-        
-        # 详细记录分布信息
-        self._log_debug(f"数据集分布分析 - 总样本: {len(self.full_dataset)}")
-        for level, count in level_counts.items():
-            if level in complexity_by_level and complexity_by_level[level]:
-                avg_complexity = np.mean(complexity_by_level[level])
-                complexity_range = (np.min(complexity_by_level[level]), np.max(complexity_by_level[level]))
-                self._log_debug(f"  {level}: {count}样本, 平均复杂度: {avg_complexity:.2f}, 范围: {complexity_range}")
+
     def should_advance_stage(self, recent_performance: float) -> bool:
         """判断是否应该进入下一阶段 - 增强调试版本"""
         self.total_advancement_checks += 1
@@ -636,8 +664,133 @@ def setup_fixed_curriculum_manager(script_cfg: ScriptConfig, dataset: Dataset) -
         return None
     # ... (Logic from curriculum_debug_config.py setup_fixed_curriculum_manager)
     # This logic needs access to create_fixed_curriculum_stages (if that's also moved/created) or other stage creation logic
-    logger.info("Setting up FixedEnhancedCurriculumManager...")
+    # logger.info("Setting up FixedEnhancedCurriculumManager...") # Original log
     # Placeholder logic:
     # stages = create_fixed_curriculum_stages() # This function would also need to be defined/moved
-    stages = create_default_curriculum_stages() # Using default for now as create_fixed_curriculum_stages is not in scope
+    # stages = create_default_curriculum_stages() # Using default for now as create_fixed_curriculum_stages is not in scope
+    # return FixedEnhancedCurriculumManager(stages, dataset) # Original return
+
+    # MODIFIED function:
+    if not script_cfg.enable_curriculum:  # type: ignore
+        logger.info("📚 Curriculum learning (fixed manager) is disabled by script_cfg.")
+        return None
+
+    logger.info("⚙️ Setting up FixedEnhancedCurriculumManager...")
+    stages: List[CurriculumStageConfig] = []
+
+    # Priority 1: Use script_cfg.curriculum_stages if provided
+    if hasattr(script_cfg, 'curriculum_stages') and script_cfg.curriculum_stages: # type: ignore
+        logger.info("Found curriculum_stages in script_cfg. Attempting to use them.")
+        try:
+            for stage_dict in script_cfg.curriculum_stages: # type: ignore
+                # Ensure all required fields for CurriculumStageConfig are present or have defaults
+                config = CurriculumStageConfig(
+                    name=stage_dict.get('name', 'Unnamed Stage'),
+                    dataset_levels=stage_dict.get('dataset_levels', []),
+                    complexity_range=tuple(stage_dict.get('complexity_range', (0.0, 10.0))), # Ensure it's a tuple
+                    epochs_ratio=stage_dict.get('epochs_ratio', 0.1), # Default ratio if missing
+                    performance_threshold=stage_dict.get('performance_threshold', 0.6),
+                    min_evaluations=stage_dict.get('min_evaluations', 5),
+                    description=stage_dict.get('description', '')
+                )
+                stages.append(config)
+            if stages:
+                 logger.info(f"✅ Successfully loaded {len(stages)} stages from script_cfg.curriculum_stages.")
+            else:
+                logger.warning("⚠️ script_cfg.curriculum_stages was provided but resulted in zero stages. Check configuration.")
+        except Exception as e:
+            logger.error(f"❌ Error processing script_cfg.curriculum_stages: {e}. Falling back.")
+            stages = [] # Reset stages if parsing failed
+
+    # Priority 2: Use create_custom_curriculum_stages
+    if not stages: # If stages were not loaded from script_cfg.curriculum_stages
+        logger.info("No stages from script_cfg.curriculum_stages or loading failed. Trying create_custom_curriculum_stages...")
+        try:
+            # Calculate dataset_distribution - using the static helper method
+            # Pass logger.info for optional logging within the method if needed, or handle logging outside.
+            dataset_dist = FixedEnhancedCurriculumManager._calculate_dataset_distribution(dataset, logger.info)
+
+            if not dataset_dist or not dataset_dist.get('total_samples'):
+                logger.warning("⚠️ Dataset distribution analysis resulted in no samples. Cannot create custom stages effectively.")
+            else:
+                # Ensure all expected attributes exist on script_cfg or provide defaults
+                custom_stages_params = {
+                    "dataset_distribution": dataset_dist,
+                    "focus_levels": getattr(script_cfg, 'curriculum_focus_levels', None), # type: ignore
+                    "complexity_emphasis": getattr(script_cfg, 'curriculum_complexity_emphasis', None) # type: ignore
+                }
+                logger.info(f"Parameters for create_custom_curriculum_stages: focus_levels={custom_stages_params['focus_levels']}, emphasis={custom_stages_params['complexity_emphasis']}")
+                stages = create_custom_curriculum_stages(**custom_stages_params) # from .stages
+
+            if stages:
+                logger.info(f"✅ Successfully created {len(stages)} custom stages.")
+            else:
+                logger.warning("⚠️ create_custom_curriculum_stages resulted in zero stages.")
+        except Exception as e:
+            logger.error(f"❌ Error calling create_custom_curriculum_stages: {e}. Falling back to default.")
+            stages = [] # Reset stages
+
+    # Priority 3: Fallback to create_default_curriculum_stages
+    if not stages:
+        logger.info("No stages from custom creation or it failed. Falling back to create_default_curriculum_stages.")
+        try:
+            stages = create_default_curriculum_stages() # from .stages
+            if stages:
+                logger.info(f"✅ Successfully created {len(stages)} default stages.")
+            else:
+                logger.error("❌ create_default_curriculum_stages also resulted in zero stages! This is problematic.")
+                return None # Cannot proceed without stages
+        except Exception as e:
+            logger.error(f"❌ Error calling create_default_curriculum_stages: {e}.")
+            return None # Cannot proceed if default stage creation fails
+
+    if not stages:
+        logger.error("🚫 Failed to create or load any curriculum stages. Cannot initialize FixedEnhancedCurriculumManager.")
+        return None
+
+    # Apply environment variable overrides
+    # For these environment variables to take effect, ensure they are `export`ed in your shell script (e.g., `export CURRICULUM_PERFORMANCE_THRESHOLD_1=0.75`).
+    if stages: # Ensure there are stages to process
+        logger.info(f"⚙️ Checking for environment variable overrides for {len(stages)} stages...")
+        for i, stage_config in enumerate(stages):
+            stage_index = i + 1 # Environment variables are 1-indexed
+
+            # Check for performance_threshold override
+            env_threshold_str = os.environ.get(f"CURRICULUM_PERFORMANCE_THRESHOLD_{stage_index}")
+            if env_threshold_str:
+                try:
+                    env_threshold_val = float(env_threshold_str)
+                    original_threshold = stage_config.performance_threshold
+                    if abs(original_threshold - env_threshold_val) > 1e-6: # Check if different to avoid unnecessary logs
+                        logger.info(f"Applying ENV override for STAGE {stage_index} ('{stage_config.name}'): " \
+                                     f"CURRICULUM_PERFORMANCE_THRESHOLD_{stage_index}='{env_threshold_str}'. " \
+                                     f"Changing performance_threshold from {original_threshold:.4f} to {env_threshold_val:.4f}.")
+                        stage_config.performance_threshold = env_threshold_val
+                    else:
+                        logger.info(f"ENV CURRICULUM_PERFORMANCE_THRESHOLD_{stage_index} ('{env_threshold_str}') matches existing threshold for STAGE {stage_index} ('{stage_config.name}'). No change.")
+                except ValueError:
+                    logger.warning(f"Invalid value for CURRICULUM_PERFORMANCE_THRESHOLD_{stage_index}: '{env_threshold_str}'. Must be a float. Ignoring.")
+
+            # Check for min_evaluations override
+            env_min_eval_str = os.environ.get(f"CURRICULUM_MIN_EVALUATIONS_{stage_index}") # Corrected typo
+            if env_min_eval_str: # Check if not None and not empty
+                try:
+                    env_min_eval_val = int(env_min_eval_str)
+                    original_min_eval = stage_config.min_evaluations
+                    if original_min_eval != env_min_eval_val:
+                        logger.info(f"Applying ENV override for STAGE {stage_index} ('{stage_config.name}'): " \
+                                     f"CURRICULUM_MIN_EVALUATIONS_{stage_index}='{env_min_eval_str}'. " \
+                                     f"Changing min_evaluations from {original_min_eval} to {env_min_eval_val}.")
+                        stage_config.min_evaluations = env_min_eval_val
+                    else:
+                        logger.info(f"ENV CURRICULUM_MIN_EVALUATIONS_{stage_index} ('{env_min_eval_str}') matches existing min_evaluations for STAGE {stage_index} ('{stage_config.name}'). No change.")
+                except ValueError:
+                    logger.warning(f"Invalid value for CURRICULUM_MIN_EVALUATIONS_{stage_index}: '{env_min_eval_str}'. Must be an integer. Ignoring.")
+    else:
+        logger.info("No stages were populated, skipping environment variable override check.")
+
+    logger.info(f"🏁 Initializing FixedEnhancedCurriculumManager with {len(stages)} stages.")
+    # Note: The user should be informed that for these environment variables to take effect,
+    # they must be `export`ed in their shell script (e.g., `export CURRICULUM_PERFORMANCE_THRESHOLD_1=0.75`).
+    # This guidance is included as a comment above and should be part of the commit message or user documentation.
     return FixedEnhancedCurriculumManager(stages, dataset)
