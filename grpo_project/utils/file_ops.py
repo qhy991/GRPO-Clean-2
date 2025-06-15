@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 def validate_and_update_dataset_paths(dataset: Dataset, dataset_base_path: str = None) -> List[Dict[str, Any]]:
     """
     Validates dataset examples, resolves file paths to absolute paths,
-    and returns a list of valid examples with updated paths.
+    and ensures analysis.instantiations_found is valid (if present).
     """
     if dataset is None:
         logger.error("UTILS: Dataset provided to validate_and_update_dataset_paths is None.")
@@ -19,11 +19,11 @@ def validate_and_update_dataset_paths(dataset: Dataset, dataset_base_path: str =
     required_keys = ['prompt', 'testbench_path', 'expected_total_tests', 'reference_verilog_path']
 
     for i, example_orig in enumerate(dataset):
-        example = example_orig.copy()  # Work on a copy
+        example = example_orig.copy()
         is_valid_example = True
         prompt_log = str(example.get('prompt', 'N/A'))[:70]
 
-        # Check for missing required keys
+        # Check required keys
         for key in required_keys:
             if key not in example or example[key] is None:
                 logger.warning(f"UTILS: Dataset row {i} ('{prompt_log}...') missing or None for key '{key}'. Skipping example.")
@@ -32,39 +32,51 @@ def validate_and_update_dataset_paths(dataset: Dataset, dataset_base_path: str =
         if not is_valid_example:
             continue
 
-        # Path validation and update logic
+        # Validate analysis.instantiations_found if present
+        if 'analysis' in example and isinstance(example['analysis'], dict):
+            if 'instantiations_found' in example['analysis'] and example['analysis']['instantiations_found']:
+                if not isinstance(example['analysis']['instantiations_found'], list):
+                    logger.warning(f"UTILS: Invalid instantiations_found type in analysis for row {i} ('{prompt_log}...'): {type(example['analysis']['instantiations_found'])}. Ignoring.")
+                    example['analysis']['instantiations_found'] = []
+                elif not all(isinstance(m, str) and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", m) for m in example['analysis']['instantiations_found']):
+                    logger.warning(f"UTILS: Invalid module names in analysis.instantiations_found for row {i} ('{prompt_log}...'): {example['analysis']['instantiations_found']}. Ignoring.")
+                    example['analysis']['instantiations_found'] = []
+            else:
+                logger.debug(f"UTILS: No instantiations_found in analysis for row {i} ('{prompt_log}...'). Setting to empty list.")
+                example['analysis']['instantiations_found'] = []
+        else:
+            logger.debug(f"UTILS: No analysis field in row {i} ('{prompt_log}...'). Adding empty analysis.")
+            example['analysis'] = {'instantiations_found': []}
+
+        # Path validation and update
         tb_path_orig = str(example['testbench_path'])
         ref_path_orig = str(example['reference_verilog_path'])
 
         if dataset_base_path:
-            # Resolve testbench path
             tb_full_path = os.path.join(dataset_base_path, tb_path_orig)
             if os.path.exists(tb_full_path):
-                example['testbench_path'] = tb_full_path  # Update path in the copy
+                example['testbench_path'] = tb_full_path
             else:
                 logger.warning(f"UTILS: Testbench file not found for row {i} ('{prompt_log}...'): {tb_path_orig} (resolved to: {tb_full_path}). Skipping example.")
                 is_valid_example = False
 
-            # Resolve reference Verilog path (only if testbench was valid)
             if is_valid_example:
                 ref_full_path = os.path.join(dataset_base_path, ref_path_orig)
                 if os.path.exists(ref_full_path):
-                    example['reference_verilog_path'] = ref_full_path  # Update path in the copy
+                    example['reference_verilog_path'] = ref_full_path
                 else:
                     logger.warning(f"UTILS: Reference Verilog file not found for row {i} ('{prompt_log}...'): {ref_path_orig} (resolved to: {ref_full_path}). Skipping example.")
                     is_valid_example = False
         else:
-            # Fallback: check paths as they are (relative to CWD or absolute if already)
             if not os.path.exists(tb_path_orig):
                 logger.warning(f"UTILS: Testbench file not found (dataset_base_path not provided): {tb_path_orig} for row {i} ('{prompt_log}...'). Skipping example.")
                 is_valid_example = False
-
             if is_valid_example and not os.path.exists(ref_path_orig):
                 logger.warning(f"UTILS: Reference Verilog file not found (dataset_base_path not provided): {ref_path_orig} for row {i} ('{prompt_log}...'). Skipping example.")
                 is_valid_example = False
 
         if is_valid_example:
-            processed_examples.append(example) # Add the modified, valid example
+            processed_examples.append(example)
 
     if not processed_examples and len(dataset) > 0:
         logger.error("UTILS: No valid examples found after validation and path update. All examples were skipped.")

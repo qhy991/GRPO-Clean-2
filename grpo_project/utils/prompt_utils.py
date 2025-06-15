@@ -57,34 +57,49 @@ Requirements:
 def enhance_prompt_func(example: Dict[str, Any]) -> Dict[str, str]:
     """
     Improved prompt enhancement function with stricter formatting requirements.
-    Relies on extract_module_info.
+    Uses instantiations_found from analysis field for module name if available, falls back to extract_module_info.
     """
     original_prompt = str(example.get("prompt", "No original prompt provided in example."))
     ref_path = str(example.get("reference_verilog_path", ""))
-
+    analysis = example.get("analysis", {})
+    instantiations_found = analysis.get("instantiations_found", [])
+    
     module_name, ports = "", []
-    if ref_path and os.path.exists(ref_path):
-        try:
-            module_name, ports = extract_module_info(ref_path)
-        except Exception as e_extract:
-            logger.error(f"EnhancePrompt: Error extracting module info from {ref_path}: {e_extract}", exc_info=True)
-            # Fallback if extraction fails
-            module_name = "extracted_module_error"
-            ports = []
+    # Step 1: Try to get module name from analysis.instantiations_found
+    if instantiations_found and isinstance(instantiations_found, list) and len(instantiations_found) > 0:
+        module_name = str(instantiations_found[0])  # Use first instantiation name
+        logger.debug(f"EnhancePrompt: Using module name '{module_name}' from analysis.instantiations_found.")
+        # Still extract ports from reference file if available
+        if ref_path and os.path.exists(ref_path):
+            try:
+                _, ports = extract_module_info(ref_path)  # Only extract ports
+            except Exception as e_extract:
+                logger.error(f"EnhancePrompt: Error extracting port info from {ref_path}: {e_extract}", exc_info=True)
+                ports = []
+    else:
+        # Fallback to extracting both module name and ports
+        logger.warning(f"EnhancePrompt: No valid instantiations_found in analysis for '{ref_path}'. Analysis: {analysis}. Falling back to extract_module_info.")
+        if ref_path and os.path.exists(ref_path):
+            try:
+                module_name, ports = extract_module_info(ref_path)
+            except Exception as e_extract:
+                logger.error(f"EnhancePrompt: Error extracting module info from {ref_path}: {e_extract}", exc_info=True)
+                module_name = "extracted_module_error"
+                ports = []
 
+    # Step 2: Ensure module name is valid
     if not module_name:
-        logger.warning(f"EnhancePrompt: Could not determine module name from ref_path '{ref_path}'. Using fallback 'generated_module'.")
+        logger.warning(f"EnhancePrompt: Could not determine module name from ref_path '{ref_path}' or analysis.instantiations_found. Using fallback 'generated_module'.")
         module_name = "generated_module"
 
+    # Step 3: Extract port descriptions
     port_desc_list = []
-    if ports and ref_path and os.path.exists(ref_path): # Ensure ref_path exists for reading content
+    if ports and ref_path and os.path.exists(ref_path):
         try:
             with open(ref_path, "r", encoding="utf-8") as f_ref:
                 ref_content = f_ref.read()
             for p_name in ports:
                 try:
-                    # Regex to find full port declaration (more robust)
-                    # This regex tries to capture common Verilog port declaration styles
                     regex = r"(\b(?:input|output|inout)\b\s*(?:(?:reg|wire|logic|signed|unsigned)\s*)?(?:\[[^\]]+\]\s*)?\b" + re.escape(p_name) + r"\b)"
                     match = re.search(regex, ref_content, re.IGNORECASE | re.MULTILINE)
                     if match:
@@ -97,14 +112,20 @@ def enhance_prompt_func(example: Dict[str, Any]) -> Dict[str, str]:
                     port_desc_list.append(f"`{p_name}` (processing error)")
         except Exception as e_read_ref:
             logger.error(f"EnhancePrompt: Could not read reference file {ref_path} for port details: {e_read_ref}")
-            # Fallback if reading ref file fails but ports were somehow extracted
             port_desc_list = [f"`{p}` (reference content unreadable)" for p in ports]
-
-    elif ports: # Ports extracted but ref_path might be missing or unreadable
+    elif ports:
         port_desc_list = [f"`{p}` (no reference content provided or readable)" for p in ports]
 
     port_desc = ("; ".join(port_desc_list) if port_desc_list else "as implied by the design context or problem description")
 
+    # Step 4: Add complexity and difficulty context if available
+    complexity_context = ""
+    if "complexity_score" in example or "difficulty" in example:
+        complexity_score = example.get("complexity_score", "N/A")
+        difficulty = example.get("difficulty", "N/A")
+        complexity_context = f"\n**Design Context:**\n- Complexity Score: {complexity_score}\n- Difficulty Level: {difficulty}\n"
+
+    # Step 5: Construct system instruction
     system_instruction = f"""**CRITICAL: You must strictly adhere to the following format. Violations will result in a score of 0!**
 1. First, provide your detailed thought process between <think> and </think> tags.
 2. Then, provide the complete Verilog module code between ```verilog and ```.
@@ -130,9 +151,7 @@ endmodule
 
 **Original problem description:**
 {original_prompt}
-
+{complexity_context}
 Now, please provide your solution in the strict format specified above:
 """
-    # The 'prompt' field for the model input should be the system_instruction.
-    # 'original_prompt_for_debug' is kept for logging or if the original prompt was different.
     return {"prompt": system_instruction, "original_prompt_for_debug": original_prompt}

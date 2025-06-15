@@ -24,10 +24,10 @@ class EnhancedCurriculumManager:
 
     def __init__(self, curriculum_stages: List[CurriculumStageConfig], dataset: Dataset):
         self.stage_progression_configs = {
-            0: {"performance_threshold": 0.65, "min_evaluations": 5, "stability_window": 2},
-            1: {"performance_threshold": 0.60, "min_evaluations": 5, "stability_window": 2},
-            2: {"performance_threshold": 0.55, "min_evaluations": 5, "stability_window": 2},
-            3: {"performance_threshold": 0.50, "min_evaluations": 5, "stability_window": 2, "max_stay_steps": 200}
+            0: {"performance_threshold": 0.75, "min_evaluations": 10, "stability_window": 3},
+            1: {"performance_threshold": 0.70, "min_evaluations": 20, "stability_window": 3},
+            2: {"performance_threshold": 0.65, "min_evaluations": 20, "stability_window": 3},
+            3: {"performance_threshold": 0.60, "min_evaluations": 20, "stability_window": 2, "max_stay_steps": 200}
         }
         self.curriculum_stages = curriculum_stages
         self.full_dataset = dataset

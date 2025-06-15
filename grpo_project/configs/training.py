@@ -33,6 +33,12 @@ class ScriptConfig:
         default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         metadata={"help": "List of modules to target for LoRA in GRPO stage."}
     )
+    # 🚀 新增：流式引导配置
+    enable_streaming_guidance: bool = field(default=True, metadata={"help": "启用流式思考引导"})
+    min_reasoning_length: int = field(default=60, metadata={"help": "最小思考长度要求"})
+    guidance_trigger_threshold: int = field(default=40, metadata={"help": "触发引导的思考长度阈值"})
+    max_guidance_attempts: int = field(default=2, metadata={"help": "最大引导尝试次数"})
+    guidance_tokens_limit: int = field(default=25, metadata={"help": "每次引导的最大token数"})
 
     # 🔧 新增：独立的长度配置参数
     max_seq_length: int = field(default=4096, metadata={"help": "Maximum sequence length for tokenizer and model."})

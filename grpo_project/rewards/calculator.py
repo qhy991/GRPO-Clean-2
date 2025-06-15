@@ -1,6 +1,7 @@
 import logging
 import re
 import os
+import json
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import numpy as np # Added for statistical calculations
@@ -133,7 +134,6 @@ except ImportError:
 
     def parse_llm_completion_qwen3(text: str, debug_prompt: Optional[str]=None, debug_context:Optional[Dict[str,Any]]=None) -> tuple[Optional[str], Optional[str]]: 
         # 增强的解析功能 - 处理各种畸形格式
-        import re
         if not text or not isinstance(text, str):
             return None, None
         
@@ -246,7 +246,8 @@ class RewardCalculator:
         training_step: int = 0,
         # wandb_callback: Optional[Any] = None, # wandb_callback from train.py's scope is not directly passed here
         output_dir_for_debug: Optional[str] = None,
-        completion_idx: int = 0 # Added for consistency with original function
+        completion_idx: int = 0, # Added for consistency with original function
+        original_enhanced_prompt: Optional[str] = None  # 新增参数
     ) -> Dict[str, Any]:
 
         prompt_id_base = prompt_str.split('\n', 1)[0]
@@ -281,28 +282,128 @@ class RewardCalculator:
             penalty_type = self.reward_config.missing_code_block_penalty
             current_unscaled_components["base_compilation"] = penalty_type
             total_reward = self.reward_config.get_scaled_reward(penalty_type, training_step)
-            # Debug saving logic - 保存到子文件夹
+            
+            # 🔧 增强的调试保存逻辑
             if output_dir_for_debug:
-                # 创建调试文件的子目录
                 debug_subdir = os.path.join(output_dir_for_debug, "reward_debug", "missing_code")
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                debug_filename = os.path.join(debug_subdir, f"{sanitized_prompt_id_for_file}_completion{completion_idx}_missingcode_{timestamp}.txt")
+                
+                # 创建更详细的文件名
+                task_id = "unknown"
+                if "task_id" in str(prompt_str):
+                    # 尝试提取task_id
+                    task_match = re.search(r'task[_\s]*id[_\s]*[:\-]?\s*([a-zA-Z0-9_\-]+)', prompt_str, re.IGNORECASE)
+                    if task_match:
+                        task_id = task_match.group(1)
+                
+                debug_filename = os.path.join(debug_subdir, 
+                    f"step{training_step}_comp{completion_idx}_{task_id}_{timestamp}.json")
+                
                 try:
                     os.makedirs(debug_subdir, exist_ok=True)
-                    with open(debug_filename, "w") as f:
-                        f.write(f"Prompt ID: {prompt_id_for_log}\n")
-                        f.write(f"Completion Index: {completion_idx}\n")
-                        f.write("Reason: No code block found or code is empty.\n")
-                        f.write("Original Completion:\n")
+                    
+                    # 🔧 保存完整的调试信息
+                    debug_data = {
+                        "metadata": {
+                            "training_step": training_step,
+                            "completion_idx": completion_idx,
+                            "timestamp": timestamp,
+                            "task_id": task_id,
+                            "issue_type": "missing_code_block",
+                            "penalty_applied": penalty_type
+                        },
+                        "prompts": {
+                            "model_input_prompt": prompt_str,  # 模型实际接收的prompt
+                            "original_enhanced_prompt": original_enhanced_prompt,  # 原始增强prompt
+                            "prompt_length": len(prompt_str),
+                            "prompt_preview": prompt_str[:300] + "..." if len(prompt_str) > 300 else prompt_str
+                        },
+                        "completion_analysis": {
+                            "raw_completion": completion_str,
+                            "completion_length": len(completion_str),
+                            "has_think_tags": "<think>" in completion_str.lower(),
+                            "has_code_tags": "```verilog" in completion_str.lower() or "```" in completion_str,
+                            "extracted_reasoning": reasoning_part,
+                            "extracted_code": code_part,
+                            "parsing_issues": []
+                        },
+                        "reward_calculation": {
+                            "penalty_type": "missing_code_block",
+                            "penalty_value": penalty_type,
+                            "scaled_reward": total_reward,
+                            "training_step": training_step
+                        },
+                        "file_references": {
+                            "testbench_path": testbench_path,
+                            "reference_verilog_path": reference_verilog_path,
+                            "expected_total_tests": expected_total_tests
+                        },
+                        "analysis_suggestions": [
+                            "检查prompt格式是否正确",
+                            "验证模型是否理解任务要求", 
+                            "考虑调整生成参数(temperature, repetition_penalty)",
+                            "检查是否需要更多的训练数据"
+                        ]
+                    }
+                    
+                    # 添加具体的解析问题分析
+                    if not reasoning_part and not code_part:
+                        debug_data["completion_analysis"]["parsing_issues"].append("完全解析失败 - 无reasoning和code")
+                    elif not code_part:
+                        debug_data["completion_analysis"]["parsing_issues"].append("代码提取失败")
+                        if reasoning_part:
+                            debug_data["completion_analysis"]["parsing_issues"].append("有reasoning但无code")
+                    
+                    # 分析可能的原因
+                    if len(completion_str) < 50:
+                        debug_data["completion_analysis"]["parsing_issues"].append("输出过短")
+                    if completion_str.count("<think>") > 1:
+                        debug_data["completion_analysis"]["parsing_issues"].append("重复think标签")
+                    if completion_str.count("```") % 2 != 0:
+                        debug_data["completion_analysis"]["parsing_issues"].append("代码块标签不匹配")
+                    
+                    with open(debug_filename, "w", encoding="utf-8") as f:
+                        json.dump(debug_data, f, indent=2, ensure_ascii=False)
+                    
+                    logger.debug(f"{log_pref}: 详细调试信息已保存到 {debug_filename}")
+                    
+                    # 🔧 同时保存纯文本版本便于快速查看
+                    text_filename = debug_filename.replace('.json', '.txt')
+                    with open(text_filename, "w", encoding="utf-8") as f:
+                        f.write(f"=== 训练步数 {training_step} - 完成索引 {completion_idx} ===\n")
+                        f.write(f"时间戳: {timestamp}\n")
+                        f.write(f"任务ID: {task_id}\n")
+                        f.write(f"问题类型: 缺少代码块\n")
+                        f.write(f"惩罚值: {penalty_type}\n\n")
+                        
+                        f.write("=== 模型输入Prompt ===\n")
+                        f.write(prompt_str)
+                        f.write("\n\n")
+                        
+                        if original_enhanced_prompt and original_enhanced_prompt != prompt_str:
+                            f.write("=== 原始增强Prompt ===\n")
+                            f.write(original_enhanced_prompt)
+                            f.write("\n\n")
+                        
+                        f.write("=== 模型输出 ===\n")
                         f.write(completion_str)
-                    logger.debug(f"{log_pref}: Saved debug info for missing code to {debug_filename}")
+                        f.write("\n\n")
+                        
+                        f.write("=== 解析结果 ===\n")
+                        f.write(f"提取的reasoning: {reasoning_part}\n")
+                        f.write(f"提取的code: {code_part}\n")
+                        f.write(f"解析问题: {debug_data['completion_analysis']['parsing_issues']}\n")
+                    
+                    logger.debug(f"{log_pref}: 文本版调试信息已保存到 {text_filename}")
+                    
                 except Exception as e:
-                    logger.error(f"{log_pref}: Failed to save debug info for missing code: {e}")
+                    logger.error(f"{log_pref}: 保存调试信息失败: {e}")
+            
             return {
                 "final_reward": total_reward,
                 "unscaled_components": current_unscaled_components,
                 "funnel_metrics": current_funnel_metrics,
-                "raw_code": "" # Return empty string for raw_code if code is missing
+                "raw_code": ""
             }
 
         # Code Quality Assessment (Direct Integration)
@@ -496,25 +597,24 @@ class RewardCalculator:
             qwen_formatted_prompt_for_buffer = prompts[i]
             current_completion_str = completions[i]
 
-            # Determine prompt_for_reward_logic (user-facing prompt for _calculate_single_reward)
+            # 确定用于奖励逻辑的prompt
             prompt_for_reward_logic = ""
+            original_enhanced_prompt = None
+            
             if original_enhanced_prompts and i < len(original_enhanced_prompts) and original_enhanced_prompts[i]:
                 prompt_for_reward_logic = original_enhanced_prompts[i]
+                original_enhanced_prompt = original_enhanced_prompts[i]
             else:
-                # Fallback: Try to extract user content from Qwen-formatted prompt if original_enhanced_prompt is missing/empty
-                # This assumes Qwen format might include "user\n<actual_prompt_content>\nassistant..."
+                # 回退逻辑...
                 match = re.search(r"user\n(.*?)\nassistant", qwen_formatted_prompt_for_buffer, re.DOTALL | re.IGNORECASE)
                 if match and match.group(1).strip():
                     prompt_for_reward_logic = match.group(1).strip()
-                    logger.debug(f"Using extracted user content as prompt_for_reward_logic for item {i}")
+                    original_enhanced_prompt = prompt_for_reward_logic
                 else:
-                    # If extraction fails or not possible, use the full Qwen prompt, but log a warning
                     prompt_for_reward_logic = qwen_formatted_prompt_for_buffer
-                    logger.warning(
-                        f"Item {i}: original_enhanced_prompt not available or empty, and user content extraction failed. "
-                        f"Using full Qwen-formatted prompt for reward logic. This might affect module name extraction if not handled by _calculate_single_reward."
-                    )
+                    original_enhanced_prompt = qwen_formatted_prompt_for_buffer
             
+            # 🔧 调用时传递原始prompt
             single_result = self._calculate_single_reward(
                 prompt_str=prompt_for_reward_logic,
                 completion_str=current_completion_str,
@@ -523,7 +623,8 @@ class RewardCalculator:
                 reference_verilog_path=reference_verilog_paths[i],
                 training_step=training_step,
                 output_dir_for_debug=output_dir_for_debug,
-                completion_idx=i
+                completion_idx=i,
+                original_enhanced_prompt=original_enhanced_prompt  # 🔧 新增参数
             )
 
             batch_rewards_final_scaled.append(single_result["final_reward"])

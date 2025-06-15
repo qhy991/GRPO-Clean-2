@@ -123,6 +123,38 @@ class GRPOTrainingPipeline:
         logger.info(f"  ✅ GRPO max_prompt_length: {self.grpo_cfg.max_prompt_length}")
         logger.info(f"  ✅ GRPO max_completion_length: {self.grpo_cfg.max_completion_length}")
 
+    def _setup_stable_environment(self):
+        """🔧 设置稳定的训练环境，避免段错误"""
+        try:
+            logger.info("🔧 设置稳定训练环境...")
+            
+            # 设置CUDA环境变量以提高稳定性
+            stable_envs = {
+                "CUDA_LAUNCH_BLOCKING": "1",  # 同步CUDA操作，便于调试
+                "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:128",  # 限制内存分割
+                "NCCL_BLOCKING_WAIT": "1",  # NCCL阻塞等待
+            }
+            
+            for key, value in stable_envs.items():
+                if key not in os.environ:
+                    os.environ[key] = value
+                    logger.info(f"  设置环境变量: {key}={value}")
+            
+            # 如果启用了梯度检查点，强制禁用以避免段错误
+            if hasattr(self.grpo_cfg, 'gradient_checkpointing') and self.grpo_cfg.gradient_checkpointing:
+                logger.warning("⚠️ 检测到梯度检查点已启用，为避免段错误自动禁用")
+                self.grpo_cfg.gradient_checkpointing = False
+            
+            # 清理GPU内存
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                logger.info("✅ GPU内存已清理")
+            
+            logger.info("✅ 稳定训练环境设置完成")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 稳定环境设置失败: {e}")
+
     def _configure_wandb_resume(self):
         """🔧 自动配置WandB恢复，无需外部脚本"""
         try:
@@ -528,25 +560,42 @@ class GRPOTrainingPipeline:
             ))
 
             # Inference callback (需要 tokenizer)
+            # 🚀 使用流式引导推理回调替代原有的DetailedInferenceCallback
             if self.tokenizer and dataset_processed and len(dataset_processed) > 0:
                 sample_dataset_for_inf_cb = dataset_processed.select(
                     range(min(len(dataset_processed), self.script_cfg.callback_num_samples * 5))
                 )
 
                 if len(sample_dataset_for_inf_cb) > 0:
-                    self.callbacks.append(DetailedInferenceCallback(
-                        tokenizer=self.tokenizer, 
+                    # 导入流式引导功能
+                    from grpo_project.utils.streaming_guidance import create_streaming_inference_callback, GuidanceConfig
+                    
+                    # 配置引导参数
+                    guidance_config = GuidanceConfig(
+                        min_reasoning_length=self.script_cfg.min_reasoning_length if hasattr(self.script_cfg, 'min_reasoning_length') else 60,
+                        guidance_trigger_threshold=self.script_cfg.guidance_trigger_threshold if hasattr(self.script_cfg, 'guidance_trigger_threshold') else 40,
+                        max_guidance_attempts=self.script_cfg.max_guidance_attempts if hasattr(self.script_cfg, 'max_guidance_attempts') else 2,
+                        guidance_tokens_limit=self.script_cfg.guidance_tokens_limit if hasattr(self.script_cfg, 'guidance_tokens_limit') else 25
+                    )
+                    
+                    # 创建增强的推理回调
+                    streaming_callback = create_streaming_inference_callback(
+                        model=self.model,
+                        tokenizer=self.tokenizer,
                         eval_dataset=sample_dataset_for_inf_cb,
                         num_samples=self.script_cfg.callback_num_samples,
                         eval_every_n_steps=self.script_cfg.callback_eval_every_n_steps,
                         max_new_tokens=self.script_cfg.script_max_completion_length,
                         max_seq_length=self.script_cfg.max_seq_length,
                         experience_buffer=self.experience_buffer,
-                        output_dir=self.script_cfg.output_dir
-                    ))
-                    logger.info(f"DetailedInferenceCallback added with {len(sample_dataset_for_inf_cb)} samples.")
+                        output_dir=self.script_cfg.output_dir,
+                        guidance_config=guidance_config
+                    )
+                    
+                    self.callbacks.append(streaming_callback)
+                    logger.info(f"✅ 流式引导推理回调已添加 (samples: {len(sample_dataset_for_inf_cb)})")
                 else:
-                    logger.warning("⚠️ No samples available for DetailedInferenceCallback.")
+                    logger.warning("⚠️ 样本数据不足，跳过流式引导推理回调")
 
             # 🔧 关键修复：禁用原生WandB回调，使用同步管理器
             if self.grpo_cfg.local_rank <= 0 and "wandb" in self.grpo_cfg.report_to:
@@ -640,6 +689,9 @@ class GRPOTrainingPipeline:
         """Main training function with comprehensive error handling"""
         try:
             logger.info("🚀 Starting GRPO training process...")
+            
+            # 🔧 新增：设置稳定的训练环境
+            self._setup_stable_environment()
             
             # 🔧 关键：在训练开始前配置WandB恢复
             logger.info("📝 Step 0: Configuring WandB resume settings...")
