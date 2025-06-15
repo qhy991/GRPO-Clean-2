@@ -1,0 +1,8 @@
+{
+  "curriculum_override": {
+    "force_foundation_threshold": 0.65,
+    "force_min_evaluations": 5,
+    "force_window_size": 2,
+    "debug_mode": true
+  }
+}

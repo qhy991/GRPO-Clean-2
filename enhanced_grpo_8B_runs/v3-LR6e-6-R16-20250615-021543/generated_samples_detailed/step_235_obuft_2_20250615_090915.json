@@ -1,0 +1,36 @@
+{
+  "step": 235,
+  "timestamp_iso": "2025-06-15T09:09:15.937768",
+  "dataset_original_sample_info": {
+    "level": "intermediate",
+    "complexity_score": 5.28,
+    "original_problem_desc_for_debug": "Design a Verilog module and a comprehensive testbench for a obuft_2 based on the provided reference files. The module should correctly implement the implied functionality and pass all test cases in the testbench.",
+    "testbench_path": "/home/qhy/Research/LLM/GRPO-RV/dataset/I/testbenches/OBUFT_2_testbench.v",
+    "task_id": "obuft_2"
+  },
+  "model_input_prompt_preview": "<|im_start|>system\nYou are a Verilog expert. Please provide your solution in the following strict format:\n\n<think>\nYour detailed analysis and thinking process here\n</think>\n\n```verilog\nYour complete Verilog module code here\n```\n\nRequirements:\n- The <think> section must contain your reasoning\n- The `...",
+  "generated_result": {
+    "reasoning": "<think>\n</think>\n\n</think>",
+    "code": "module OBUFT(input I, output O, input T);\n    assign O = (T) ? ~I : I; // Output is inverted when T is high, otherwise passes through\nendmodule",
+    "raw_output_preview": "<think>\n</think>\n\n</think>\n\n```verilog\nmodule OBUFT(input I, output O, input T);\n    assign O = (T) ? ~I : I; // Output is inverted when T is high, otherwise passes through\nendmodule\n```...",
+    "generation_time_seconds": 6.0035316944122314
+  },
+  "simulation_details": {
+    "compilation_success": true,
+    "simulation_run_success": true,
+    "parsing_success": true,
+    "passed_tests": 0,
+    "failed_tests": 10,
+    "total_tests_in_output": 10,
+    "all_tests_passed_by_tb": false,
+    "error_message": null,
+    "raw_stdout": "IVERILOG COMPILE STDOUT:\n\n\nVVP SIMULATION STDOUT:\nTest Case 1 FAIL: Expected Z, Got 0\nTest Case 2 FAIL: Expected Z, Got 1\nTest Case 3 FAIL: Expected 0, Got 1\nTest Case 4 FAIL: Expected 1, Got 0\nTest Case 5 FAIL: Expected Z, Got 1\nTest Case 6 FAIL: Expected 0, Got 1\nTest Case 7 FAIL: Expected Z, Got 1\nTest Case 8 FAIL: Expected Z, Got 1\nTest Case 9 FAIL: Expected 1, Got 0\nTest Case 10 FAIL: Expected Z, Got 0\n--------------------------------SUMMARY--------------------------------\nPassed: 0, Failed: 10\nTotal Test Cases: 10\nRatio: 0/10\nOVERALL_FAIL\n-----------------------------------------------------------------------\n/home/qhy/Research/LLM/GRPO-RV/dataset/I/testbenches/OBUFT_2_testbench.v:103: $finish called at 12 (1s)\n\n",
+    "raw_stderr": "IVERILOG COMPILE STDERR:\n\nVVP SIMULATION STDERR:\n\n",
+    "quality_metrics": {
+      "complexity": 1.0,
+      "readability": 0.9666666666666666,
+      "efficiency": 1.0,
+      "structure": 0.7333333333333334
+    }
+  }
+}

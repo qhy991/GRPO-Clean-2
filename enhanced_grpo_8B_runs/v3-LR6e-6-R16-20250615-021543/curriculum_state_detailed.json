@@ -1,0 +1,606 @@
+{
+  "current_stage": 4,
+  "performance_history": [
+    {
+      "step": 102,
+      "performance": 0.5,
+      "loss": 0.0217,
+      "stage": 2
+    },
+    {
+      "step": 104,
+      "performance": 0.5,
+      "loss": 0.0236,
+      "stage": 2
+    },
+    {
+      "step": 106,
+      "performance": 0.5,
+      "loss": 0.0228,
+      "stage": 2
+    },
+    {
+      "step": 108,
+      "performance": 0.5,
+      "loss": 0.0266,
+      "stage": 2
+    },
+    {
+      "step": 110,
+      "performance": 0.5,
+      "loss": 0.0288,
+      "stage": 2
+    },
+    {
+      "step": 112,
+      "performance": 0.5,
+      "loss": 0.0281,
+      "stage": 2
+    },
+    {
+      "step": 114,
+      "performance": 0.5,
+      "loss": 0.0277,
+      "stage": 2
+    },
+    {
+      "step": 116,
+      "performance": 0.5,
+      "loss": 0.0287,
+      "stage": 2
+    },
+    {
+      "step": 118,
+      "performance": 0.5,
+      "loss": 0.0277,
+      "stage": 2
+    },
+    {
+      "step": 120,
+      "performance": 0.5,
+      "loss": 0.0262,
+      "stage": 2
+    },
+    {
+      "step": 122,
+      "performance": 0.5,
+      "loss": 0.0279,
+      "stage": 2
+    },
+    {
+      "step": 124,
+      "performance": 0.5,
+      "loss": 0.0267,
+      "stage": 2
+    },
+    {
+      "step": 126,
+      "performance": 0.5,
+      "loss": 0.0231,
+      "stage": 2
+    },
+    {
+      "step": 128,
+      "performance": 0.5,
+      "loss": 0.0261,
+      "stage": 2
+    },
+    {
+      "step": 130,
+      "performance": 0.5,
+      "loss": 0.0251,
+      "stage": 3
+    },
+    {
+      "step": 132,
+      "performance": 0.5,
+      "loss": 0.0192,
+      "stage": 3
+    },
+    {
+      "step": 134,
+      "performance": 0.5,
+      "loss": 0.0244,
+      "stage": 3
+    },
+    {
+      "step": 136,
+      "performance": 0.5,
+      "loss": 0.0227,
+      "stage": 3
+    },
+    {
+      "step": 138,
+      "performance": 0.5,
+      "loss": 0.0239,
+      "stage": 3
+    },
+    {
+      "step": 140,
+      "performance": 0.5,
+      "loss": 0.0228,
+      "stage": 3
+    },
+    {
+      "step": 142,
+      "performance": 0.5,
+      "loss": 0.0207,
+      "stage": 3
+    },
+    {
+      "step": 144,
+      "performance": 0.5,
+      "loss": 0.0269,
+      "stage": 3
+    },
+    {
+      "step": 146,
+      "performance": 0.5,
+      "loss": 0.0219,
+      "stage": 3
+    },
+    {
+      "step": 148,
+      "performance": 0.5,
+      "loss": 0.0222,
+      "stage": 3
+    },
+    {
+      "step": 150,
+      "performance": 0.5,
+      "loss": 0.0272,
+      "stage": 3
+    },
+    {
+      "step": 152,
+      "performance": 0.5,
+      "loss": 0.0256,
+      "stage": 3
+    },
+    {
+      "step": 154,
+      "performance": 0.5,
+      "loss": 0.0219,
+      "stage": 3
+    },
+    {
+      "step": 156,
+      "performance": 0.5,
+      "loss": 0.0205,
+      "stage": 3
+    },
+    {
+      "step": 158,
+      "performance": 0.5,
+      "loss": 0.0244,
+      "stage": 3
+    },
+    {
+      "step": 160,
+      "performance": 0.5,
+      "loss": 0.0249,
+      "stage": 3
+    },
+    {
+      "step": 162,
+      "performance": 0.5,
+      "loss": 0.0255,
+      "stage": 3
+    },
+    {
+      "step": 164,
+      "performance": 0.5,
+      "loss": 0.0263,
+      "stage": 3
+    },
+    {
+      "step": 166,
+      "performance": 0.5,
+      "loss": 0.0252,
+      "stage": 3
+    },
+    {
+      "step": 168,
+      "performance": 0.5,
+      "loss": 0.0245,
+      "stage": 3
+    },
+    {
+      "step": 170,
+      "performance": 0.5,
+      "loss": 0.0292,
+      "stage": 3
+    },
+    {
+      "step": 172,
+      "performance": 0.5,
+      "loss": 0.0268,
+      "stage": 3
+    },
+    {
+      "step": 174,
+      "performance": 0.5,
+      "loss": 0.0259,
+      "stage": 3
+    },
+    {
+      "step": 176,
+      "performance": 0.5,
+      "loss": 0.0262,
+      "stage": 3
+    },
+    {
+      "step": 178,
+      "performance": 0.5,
+      "loss": 0.026,
+      "stage": 3
+    },
+    {
+      "step": 180,
+      "performance": 0.5,
+      "loss": 0.0225,
+      "stage": 4
+    },
+    {
+      "step": 182,
+      "performance": 0.5,
+      "loss": 0.0236,
+      "stage": 4
+    },
+    {
+      "step": 184,
+      "performance": 0.5,
+      "loss": 0.026,
+      "stage": 4
+    },
+    {
+      "step": 186,
+      "performance": 0.5,
+      "loss": 0.0237,
+      "stage": 4
+    },
+    {
+      "step": 188,
+      "performance": 0.5,
+      "loss": 0.022,
+      "stage": 4
+    },
+    {
+      "step": 190,
+      "performance": 0.5,
+      "loss": 0.0199,
+      "stage": 4
+    },
+    {
+      "step": 192,
+      "performance": 0.5,
+      "loss": 0.0233,
+      "stage": 4
+    },
+    {
+      "step": 194,
+      "performance": 0.5,
+      "loss": 0.0233,
+      "stage": 4
+    },
+    {
+      "step": 196,
+      "performance": 0.5,
+      "loss": 0.0216,
+      "stage": 4
+    },
+    {
+      "step": 198,
+      "performance": 0.5,
+      "loss": 0.022,
+      "stage": 4
+    },
+    {
+      "step": 200,
+      "performance": 0.5,
+      "loss": 0.0204,
+      "stage": 4
+    },
+    {
+      "step": 202,
+      "performance": 0.5,
+      "loss": 0.0198,
+      "stage": 4
+    },
+    {
+      "step": 204,
+      "performance": 0.5,
+      "loss": 0.0216,
+      "stage": 4
+    },
+    {
+      "step": 206,
+      "performance": 0.5,
+      "loss": 0.0221,
+      "stage": 4
+    },
+    {
+      "step": 208,
+      "performance": 0.5,
+      "loss": 0.02,
+      "stage": 4
+    },
+    {
+      "step": 210,
+      "performance": 0.5,
+      "loss": 0.0227,
+      "stage": 4
+    },
+    {
+      "step": 212,
+      "performance": 0.5,
+      "loss": 0.0207,
+      "stage": 4
+    },
+    {
+      "step": 214,
+      "performance": 0.5,
+      "loss": 0.0209,
+      "stage": 4
+    },
+    {
+      "step": 216,
+      "performance": 0.5,
+      "loss": 0.023,
+      "stage": 4
+    },
+    {
+      "step": 218,
+      "performance": 0.5,
+      "loss": 0.0236,
+      "stage": 4
+    },
+    {
+      "step": 220,
+      "performance": 0.5,
+      "loss": 0.0224,
+      "stage": 4
+    },
+    {
+      "step": 222,
+      "performance": 0.5,
+      "loss": 0.0236,
+      "stage": 4
+    },
+    {
+      "step": 224,
+      "performance": 0.5,
+      "loss": 0.0222,
+      "stage": 4
+    },
+    {
+      "step": 226,
+      "performance": 0.5,
+      "loss": 0.0245,
+      "stage": 4
+    },
+    {
+      "step": 228,
+      "performance": 0.5,
+      "loss": 0.0214,
+      "stage": 4
+    },
+    {
+      "step": 230,
+      "performance": 0.5,
+      "loss": 0.0245,
+      "stage": 4
+    },
+    {
+      "step": 232,
+      "performance": 0.5,
+      "loss": 0.0218,
+      "stage": 4
+    },
+    {
+      "step": 234,
+      "performance": 0.5,
+      "loss": 0.0235,
+      "stage": 4
+    },
+    {
+      "step": 236,
+      "performance": 0.5,
+      "loss": 0.0234,
+      "stage": 4
+    },
+    {
+      "step": 238,
+      "performance": 0.5,
+      "loss": 0.0204,
+      "stage": 4
+    },
+    {
+      "step": 240,
+      "performance": 0.5,
+      "loss": 0.0215,
+      "stage": 4
+    },
+    {
+      "step": 242,
+      "performance": 0.5,
+      "loss": 0.0233,
+      "stage": 4
+    },
+    {
+      "step": 244,
+      "performance": 0.5,
+      "loss": 0.0208,
+      "stage": 4
+    },
+    {
+      "step": 246,
+      "performance": 0.5,
+      "loss": 0.0244,
+      "stage": 4
+    },
+    {
+      "step": 248,
+      "performance": 0.5,
+      "loss": 0.024,
+      "stage": 4
+    },
+    {
+      "step": 250,
+      "performance": 0.5,
+      "loss": 0.0218,
+      "stage": 4
+    },
+    {
+      "step": 252,
+      "performance": 0.5,
+      "loss": 0.0211,
+      "stage": 4
+    },
+    {
+      "step": 254,
+      "performance": 0.5,
+      "loss": 0.0215,
+      "stage": 4
+    },
+    {
+      "step": 256,
+      "performance": 0.5,
+      "loss": 0.0187,
+      "stage": 4
+    },
+    {
+      "step": 258,
+      "performance": 0.5,
+      "loss": 0.0229,
+      "stage": 4
+    },
+    {
+      "step": 260,
+      "performance": 0.5,
+      "loss": 0.0195,
+      "stage": 4
+    },
+    {
+      "step": 262,
+      "performance": 0.5,
+      "loss": 0.0238,
+      "stage": 4
+    },
+    {
+      "step": 264,
+      "performance": 0.5,
+      "loss": 0.0233,
+      "stage": 4
+    },
+    {
+      "step": 266,
+      "performance": 0.5,
+      "loss": 0.0238,
+      "stage": 4
+    },
+    {
+      "step": 268,
+      "performance": 0.5,
+      "loss": 0.021,
+      "stage": 4
+    },
+    {
+      "step": 270,
+      "performance": 0.5,
+      "loss": 0.0223,
+      "stage": 4
+    },
+    {
+      "step": 272,
+      "performance": 0.5,
+      "loss": 0.02,
+      "stage": 4
+    },
+    {
+      "step": 274,
+      "performance": 0.5,
+      "loss": 0.0189,
+      "stage": 4
+    },
+    {
+      "step": 276,
+      "performance": 0.5,
+      "loss": 0.0188,
+      "stage": 4
+    },
+    {
+      "step": 278,
+      "performance": 0.5,
+      "loss": 0.0193,
+      "stage": 4
+    },
+    {
+      "step": 280,
+      "performance": 0.5,
+      "loss": 0.0216,
+      "stage": 4
+    },
+    {
+      "step": 282,
+      "performance": 0.5,
+      "loss": 0.0192,
+      "stage": 4
+    },
+    {
+      "step": 284,
+      "performance": 0.5,
+      "loss": 0.0204,
+      "stage": 4
+    },
+    {
+      "step": 286,
+      "performance": 0.5,
+      "loss": 0.0227,
+      "stage": 4
+    },
+    {
+      "step": 288,
+      "performance": 0.5,
+      "loss": 0.0217,
+      "stage": 4
+    },
+    {
+      "step": 290,
+      "performance": 0.5,
+      "loss": 0.02,
+      "stage": 4
+    },
+    {
+      "step": 292,
+      "performance": 0.5,
+      "loss": 0.0203,
+      "stage": 4
+    },
+    {
+      "step": 294,
+      "performance": 0.5,
+      "loss": 0.0183,
+      "stage": 4
+    },
+    {
+      "step": 296,
+      "performance": 0.5,
+      "loss": 0.0217,
+      "stage": 4
+    },
+    {
+      "step": 298,
+      "performance": 0.5,
+      "loss": 0.0184,
+      "stage": 4
+    },
+    {
+      "step": 300,
+      "performance": 0.5,
+      "loss": 0.0199,
+      "stage": 4
+    }
+  ],
+  "timestamp": "2025-06-15T10:56:33.279942"
+}

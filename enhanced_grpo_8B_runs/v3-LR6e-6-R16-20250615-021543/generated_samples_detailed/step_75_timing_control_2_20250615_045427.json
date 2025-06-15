@@ -1,0 +1,36 @@
+{
+  "step": 75,
+  "timestamp_iso": "2025-06-15T04:54:27.034406",
+  "dataset_original_sample_info": {
+    "level": "intermediate",
+    "complexity_score": 5.98,
+    "original_problem_desc_for_debug": "Design a Verilog module and a comprehensive testbench for a timing_control_2 based on the provided reference files. The module should correctly implement the implied functionality and pass all test cases in the testbench.",
+    "testbench_path": "/home/qhy/Research/LLM/GRPO-RV/dataset/I/testbenches/timing_control_2_testbench.v",
+    "task_id": "timing_control_2"
+  },
+  "model_input_prompt_preview": "<|im_start|>system\nYou are a Verilog expert. Please provide your solution in the following strict format:\n\n<think>\nYour detailed analysis and thinking process here\n</think>\n\n```verilog\nYour complete Verilog module code here\n```\n\nRequirements:\n- The <think> section must contain your reasoning\n- The `...",
+  "generated_result": {
+    "reasoning": "<think>\n</think>\n\n</think>",
+    "code": "module timing_control(\n    input wire clk_in,\n    output reg clk_out,\n    input wire ctrl_in,\n    output reg ctrl_out,\n    input wire [7:0] data_in,\n    output reg [7:0] data_out,\n    input wire reset\n);\n\n// Internal registers\nreg [7:0] counter;\nreg [7:0] delay_counter;\n\n// Clock divider\nalways @(posedge clk_in or posedge reset) begin\n    if (reset) begin\n        counter <= 8'd0;\n        clk_out <= 1'b0;\n    end else begin\n        counter <= counter + 1'b1;\n        if (counter == 8'd50) begin // Divide by 50 clock cycles\n            counter <= 8'd0;\n            clk_out <= ~clk_out;\n        end\n    end\nend\n\n// Control signal generator\nalways @(posedge clk_out or posedge reset) begin\n    if (reset) begin\n        delay_counter <= 8'd0;\n        ctrl_out <= 1'b0;\n    end else begin\n        if (delay_counter > 8'd0)\n            delay_counter <= delay_counter - 1'b1;\n        \n        if (delay_counter == 8'd0 && !ctrl_in) begin\n            ctrl_out <= 1'b1;\n            delay_counter <= #1 $random % 8'd50; // Random delay between 0 and 49\n        end else if (ctrl_in) begin\n            ctrl_out <= 1'b0;\n            delay_counter <= 8'd0;\n        end\n    end\nend\n\n// Data processing\nalways @(posedge clk_out or posedge reset) begin\n    if (reset) begin\n        data_out <= 8'd0;\n    end else begin\n        data_out <= data_in ^ {data_in[6:0], data_in[7]}; // Simple XOR operation with shifted bit\n    end\nend\n\nendmodule",
+    "raw_output_preview": "<think>\n</think>\n\n</think>\n\n```verilog\nmodule timing_control(\n    input wire clk_in,\n    output reg clk_out,\n    input wire ctrl_in,\n    output reg ctrl_out,\n    input wire [7:0] data_in,\n    output reg [7:0] data_out,\n    input wire reset\n);\n\n// Internal registers\nreg [7:0] counter;\nreg [7:0] delay...",
+    "generation_time_seconds": 46.9507040977478
+  },
+  "simulation_details": {
+    "compilation_success": true,
+    "simulation_run_success": true,
+    "parsing_success": true,
+    "passed_tests": 2,
+    "failed_tests": 6,
+    "total_tests_in_output": 8,
+    "all_tests_passed_by_tb": false,
+    "error_message": null,
+    "raw_stdout": "IVERILOG COMPILE STDOUT:\n\n\nVVP SIMULATION STDOUT:\nTest Case 1: PASS\nTest Case 0: FAIL - Expected {D:aa, CLK:1, CTRL:0}, Got {D:00, CLK:0, CTRL:0}\nTest Case 1: FAIL - Expected {D:aa, CLK:1, CTRL:1}, Got {D:00, CLK:0, CTRL:0}\nTest Case 0: FAIL - Expected {D:55, CLK:1, CTRL:1}, Got {D:00, CLK:0, CTRL:0}\nTest Case 5: FAIL - CLK_OUT dropped during low phase\nTest Case 0: PASS\nTest Case 1: FAIL - Expected {D:ff, CLK:1, CTRL:0}, Got {D:00, CLK:0, CTRL:0}\nTest Case 0: FAIL - Expected {D:0f, CLK:1, CTRL:1}, Got {D:00, CLK:0, CTRL:0}\n--------------------------------SUMMARY--------------------------------\nPassed: 2, Failed: 6\nTotal Test Cases: 8\nRatio: 2/8\nOVERALL_FAIL\n-----------------------------------------------------------------------\n/home/qhy/Research/LLM/GRPO-RV/dataset/I/testbenches/timing_control_2_testbench.v:120: $finish called at 76 (1s)\n\n",
+    "raw_stderr": "IVERILOG COMPILE STDERR:\n\nVVP SIMULATION STDERR:\n\n",
+    "quality_metrics": {
+      "complexity": 0.5,
+      "readability": 0.5745098039215686,
+      "efficiency": 0.7,
+      "structure": 0.7333333333333334
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "curriculum_learning": {
+    "enabled": true,
+    "performance_threshold_override": 0.65,
+    "min_evaluations_override": 5,
+    "sliding_window_size": 2
+  }
+}
