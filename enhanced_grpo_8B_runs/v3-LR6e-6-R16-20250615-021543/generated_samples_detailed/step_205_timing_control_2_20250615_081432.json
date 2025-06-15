@@ -1,0 +1,36 @@
+{
+  "step": 205,
+  "timestamp_iso": "2025-06-15T08:14:32.589203",
+  "dataset_original_sample_info": {
+    "level": "intermediate",
+    "complexity_score": 5.98,
+    "original_problem_desc_for_debug": "Design a Verilog module and a comprehensive testbench for a timing_control_2 based on the provided reference files. The module should correctly implement the implied functionality and pass all test cases in the testbench.",
+    "testbench_path": "/home/qhy/Research/LLM/GRPO-RV/dataset/I/testbenches/timing_control_2_testbench.v",
+    "task_id": "timing_control_2"
+  },
+  "model_input_prompt_preview": "<|im_start|>system\nYou are a Verilog expert. Please provide your solution in the following strict format:\n\n<think>\nYour detailed analysis and thinking process here\n</think>\n\n```verilog\nYour complete Verilog module code here\n```\n\nRequirements:\n- The <think> section must contain your reasoning\n- The `...",
+  "generated_result": {
+    "reasoning": "<think>\n</think>\n\n</think>",
+    "code": "module timing_control(\n    input clk_in,\n    output reg clk_out,\n    input ctrl_in,\n    output reg ctrl_out,\n    input [7:0] data_in,\n    output reg [7:0] data_out,\n    input reset\n);\n\nreg [2:0] state;\n\nalways @(posedge clk_in or posedge reset) begin\n    if (reset) begin\n        state <= 3'b000;\n        clk_out <= 1'b0;\n        ctrl_out <= 1'b0;\n        data_out <= 8'h00;\n    end else begin\n        case (state)\n            3'b000: begin // Idle state\n                clk_out <= 1'b0;\n                ctrl_out <= 1'b0;\n                data_out <= 8'h00;\n                state <= 3'b001; // Move to next state\n            end\n            3'b001: begin // Toggle clock\n                clk_out <= ~clk_out;\n                state <= 3'b010; // Move to next state\n            end\n            3'b010: begin // Set control signal\n                ctrl_out <= ctrl_in;\n                state <= 3'b011; // Move to next state\n            end\n            3'b011: begin // Update data\n                data_out <= data_in; // Assign data_in to data_out\n                state <= 3'b100; // Move to next state\n            end\n            3'b100: begin // Reset to idle state\n                state <= 3'b000;\n            end\n            default: state <= 3'b000; // Ensure we always return to idle state\n        endcase\n    end\nend\n\nendmodule",
+    "raw_output_preview": "<think>\n</think>\n\n</think>\n\n```verilog\nmodule timing_control(\n    input clk_in,\n    output reg clk_out,\n    input ctrl_in,\n    output reg ctrl_out,\n    input [7:0] data_in,\n    output reg [7:0] data_out,\n    input reset\n);\n\nreg [2:0] state;\n\nalways @(posedge clk_in or posedge reset) begin\n    if (re...",
+    "generation_time_seconds": 42.91736102104187
+  },
+  "simulation_details": {
+    "compilation_success": true,
+    "simulation_run_success": true,
+    "parsing_success": true,
+    "passed_tests": 3,
+    "failed_tests": 5,
+    "total_tests_in_output": 8,
+    "all_tests_passed_by_tb": false,
+    "error_message": null,
+    "raw_stdout": "IVERILOG COMPILE STDOUT:\n\n\nVVP SIMULATION STDOUT:\nTest Case 1: PASS\nTest Case 0: FAIL - Expected {D:aa, CLK:1, CTRL:0}, Got {D:00, CLK:0, CTRL:0}\nTest Case 1: FAIL - Expected {D:aa, CLK:1, CTRL:1}, Got {D:00, CLK:1, CTRL:0}\nTest Case 0: FAIL - Expected {D:55, CLK:1, CTRL:1}, Got {D:00, CLK:1, CTRL:1}\nTest Case 5: PASS\nTest Case 0: PASS\nTest Case 1: FAIL - Expected {D:ff, CLK:1, CTRL:0}, Got {D:00, CLK:0, CTRL:0}\nTest Case 0: FAIL - Expected {D:0f, CLK:1, CTRL:1}, Got {D:00, CLK:1, CTRL:0}\n--------------------------------SUMMARY--------------------------------\nPassed: 3, Failed: 5\nTotal Test Cases: 8\nRatio: 3/8\nOVERALL_FAIL\n-----------------------------------------------------------------------\n/home/qhy/Research/LLM/GRPO-RV/dataset/I/testbenches/timing_control_2_testbench.v:120: $finish called at 76 (1s)\n\n",
+    "raw_stderr": "IVERILOG COMPILE STDERR:\n\nVVP SIMULATION STDERR:\n\n",
+    "quality_metrics": {
+      "complexity": 0.6,
+      "readability": 0.8,
+      "efficiency": 0.7,
+      "structure": 1.0
+    }
+  }
+}
