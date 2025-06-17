@@ -1,0 +1,36 @@
+{
+  "step": 100,
+  "timestamp_iso": "2025-06-17T18:58:06.174757",
+  "dataset_original_sample_info": {
+    "level": "basic",
+    "complexity_score": 4.03,
+    "original_problem_desc_for_debug": "Design a Verilog module and a comprehensive testbench for a pipelinereg_memwb based on the provided reference files. The module should correctly implement the implied functionality and pass all test cases in the testbench.",
+    "testbench_path": "/home/qhy/Research/LLM/GRPO-RV/dataset/A/testbenches/PipelineReg_MEMWB_testbench_debug.v",
+    "task_id": "pipelinereg_memwb"
+  },
+  "model_input_prompt_preview": "...",
+  "generated_result": {
+    "reasoning": "",
+    "code": "module PipelineReg_MEMWB (\n    output reg [12:0] data_out,\n    input [7:0] data_to_reg,\n    input nclk,\n    input [3:0] reg_dest,\n    input reg_write,\n    input rst\n);\n\nalways @(negedge nclk or posedge rst) begin\n    if (rst) begin\n        data_out <= 13'b0;\n    end else if (reg_write && reg_dest == 4'b0000) begin\n        data_out <= {5'b0, data_to_reg};\n    end\nend\n\nendmodule\n\nmodule PipelineReg_MEMWB_testbench;\n    reg [12:0] data_out;\n    reg [7:0] data_to_reg;\n    reg nclk;\n    reg [3:0] reg_dest;\n    reg reg_write;\n    reg rst;\n\n    PipelineReg_MEMWB dut (\n        .data_out(data_out),\n        .data_to_reg(data_to_reg),\n        .nclk(nclk),\n        .reg_dest(reg_dest),\n        .reg_write(reg_write),\n        .rst(rst)\n    );\n\n    initial begin\n        // Test case 1: Write to register 0\n        nclk = 0;\n        rst = 0;\n        reg_write = 1;\n        reg_dest = 4'b0000;\n        data_to_reg = 8'hA5;\n        #10 nclk = 1;\n        #10 nclk = 0;\n        #10 $display(\"Test case 1 - Expected: 13'h3A5, Actual: %h\", data_out);\n\n        // Test case 2: Write to register 1\n        nclk = 0;\n        reg_write = 1;\n        reg_dest = 4'b0001;\n        data_to_reg = 8'hC3;\n        #10 nclk = 1;\n        #10 nclk = 0;\n        #10 $display(\"Test case 2 - Expected: 13'h00C3, Actual: %h\", data_out);\n\n        // Test case 3: Write to register 2\n        nclk = 0;\n        reg_write = 1;\n        reg_dest = 4'b0010;\n        data_to_reg = 8'hF0;\n        #10 nclk = 1;\n        #10 nclk = 0;\n        #10 $display(\"Test case 3 - Expected: 13'h00F0, Actual: %h\", data_out);\n\n        // Test case 4: No write\n        nclk = 0;\n        reg_write = 0;\n        #10 nclk = 1;\n        #10 nclk = 0;\n        #10 $display(\"Test case 4 - Expected: 13'h0000, Actual: %h\", data_out);\n\n        // Test case 5: Reset\n        nclk = 0;\n        reg_write = 1;\n        reg_dest = 4'b0000;\n        data_to_reg = 8'hFF;\n        rst = 1;\n        #10 nclk = 1;\n        #10 rst = 0;\n        #10 $display(\"Test case 5 - Expected: 13'h0000, Actual: %h\", data_out);\n\n        $finish;\n    end\n\nendmodule\n```\n\n</think>\n\n</think>",
+    "raw_output_preview": "```verilog\nmodule PipelineReg_MEMWB (\n    output reg [12:0] data_out,\n    input [7:0] data_to_reg,\n    input nclk,\n    input [3:0] reg_dest,\n    input reg_write,\n    input rst\n);\n\nalways @(negedge nclk or posedge rst) begin\n    if (rst) begin\n        data_out <= 13'b0;\n    end else if (reg_write && ...",
+    "generation_time_seconds": 0.0
+  },
+  "simulation_details": {
+    "compilation_success": false,
+    "simulation_run_success": false,
+    "parsing_success": false,
+    "passed_tests": 0,
+    "failed_tests": 0,
+    "total_tests_in_output": 0,
+    "all_tests_passed_by_tb": false,
+    "error_message": "Icarus Verilog compilation failed. Exit: 2. Stderr: /tmp/tmp6spk9o_8/design_under_test.v:87: syntax error\nI give up.\n",
+    "raw_stdout": "IVERILOG COMPILE STDOUT:\n\n",
+    "raw_stderr": "IVERILOG COMPILE STDERR:\n/tmp/tmp6spk9o_8/design_under_test.v:87: syntax error\nI give up.\n\n",
+    "quality_metrics": {
+      "complexity": 0,
+      "readability": 0.4282051282051282,
+      "efficiency": 0.7,
+      "structure": 1.0
+    }
+  }
+}

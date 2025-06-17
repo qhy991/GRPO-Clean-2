@@ -1,0 +1,606 @@
+{
+  "current_stage": 0,
+  "performance_history": [
+    {
+      "step": 1,
+      "performance": 0.5,
+      "loss": 0.0136,
+      "stage": 0
+    },
+    {
+      "step": 2,
+      "performance": 0.5,
+      "loss": 0.0086,
+      "stage": 0
+    },
+    {
+      "step": 3,
+      "performance": 0.5,
+      "loss": 0.0112,
+      "stage": 0
+    },
+    {
+      "step": 4,
+      "performance": 0.5,
+      "loss": 0.0115,
+      "stage": 0
+    },
+    {
+      "step": 5,
+      "performance": 0.5,
+      "loss": 0.0098,
+      "stage": 0
+    },
+    {
+      "step": 6,
+      "performance": 0.5,
+      "loss": 0.0119,
+      "stage": 0
+    },
+    {
+      "step": 7,
+      "performance": 0.5,
+      "loss": 0.0091,
+      "stage": 0
+    },
+    {
+      "step": 8,
+      "performance": 0.5,
+      "loss": 0.0139,
+      "stage": 0
+    },
+    {
+      "step": 9,
+      "performance": 0.5,
+      "loss": 0.0096,
+      "stage": 0
+    },
+    {
+      "step": 10,
+      "performance": 0.5,
+      "loss": 0.0145,
+      "stage": 0
+    },
+    {
+      "step": 11,
+      "performance": 0.5,
+      "loss": 0.0167,
+      "stage": 0
+    },
+    {
+      "step": 12,
+      "performance": 0.5,
+      "loss": 0.0118,
+      "stage": 0
+    },
+    {
+      "step": 13,
+      "performance": 0.5,
+      "loss": 0.0181,
+      "stage": 0
+    },
+    {
+      "step": 14,
+      "performance": 0.5,
+      "loss": 0.0137,
+      "stage": 0
+    },
+    {
+      "step": 15,
+      "performance": 0.5,
+      "loss": 0.0083,
+      "stage": 0
+    },
+    {
+      "step": 16,
+      "performance": 0.5,
+      "loss": 0.0122,
+      "stage": 0
+    },
+    {
+      "step": 17,
+      "performance": 0.5,
+      "loss": 0.0127,
+      "stage": 0
+    },
+    {
+      "step": 18,
+      "performance": 0.5,
+      "loss": 0.0105,
+      "stage": 0
+    },
+    {
+      "step": 19,
+      "performance": 0.5,
+      "loss": 0.0171,
+      "stage": 0
+    },
+    {
+      "step": 20,
+      "performance": 0.5,
+      "loss": 0.0122,
+      "stage": 0
+    },
+    {
+      "step": 21,
+      "performance": 0.5,
+      "loss": 0.0088,
+      "stage": 0
+    },
+    {
+      "step": 22,
+      "performance": 0.5,
+      "loss": 0.008,
+      "stage": 0
+    },
+    {
+      "step": 23,
+      "performance": 0.5,
+      "loss": 0.0085,
+      "stage": 0
+    },
+    {
+      "step": 24,
+      "performance": 0.5,
+      "loss": 0.0087,
+      "stage": 0
+    },
+    {
+      "step": 25,
+      "performance": 0.5,
+      "loss": 0.0106,
+      "stage": 0
+    },
+    {
+      "step": 26,
+      "performance": 0.5,
+      "loss": 0.0078,
+      "stage": 0
+    },
+    {
+      "step": 27,
+      "performance": 0.5,
+      "loss": 0.0151,
+      "stage": 0
+    },
+    {
+      "step": 28,
+      "performance": 0.5,
+      "loss": 0.0101,
+      "stage": 0
+    },
+    {
+      "step": 29,
+      "performance": 0.5,
+      "loss": 0.0102,
+      "stage": 0
+    },
+    {
+      "step": 30,
+      "performance": 0.5,
+      "loss": 0.0085,
+      "stage": 0
+    },
+    {
+      "step": 31,
+      "performance": 0.5,
+      "loss": 0.0151,
+      "stage": 0
+    },
+    {
+      "step": 32,
+      "performance": 0.5,
+      "loss": 0.0112,
+      "stage": 0
+    },
+    {
+      "step": 33,
+      "performance": 0.5,
+      "loss": 0.0077,
+      "stage": 0
+    },
+    {
+      "step": 34,
+      "performance": 0.5,
+      "loss": 0.0121,
+      "stage": 0
+    },
+    {
+      "step": 35,
+      "performance": 0.5,
+      "loss": 0.0082,
+      "stage": 0
+    },
+    {
+      "step": 36,
+      "performance": 0.5,
+      "loss": 0.0203,
+      "stage": 0
+    },
+    {
+      "step": 37,
+      "performance": 0.5,
+      "loss": 0.0076,
+      "stage": 0
+    },
+    {
+      "step": 38,
+      "performance": 0.5,
+      "loss": 0.0192,
+      "stage": 0
+    },
+    {
+      "step": 39,
+      "performance": 0.5,
+      "loss": 0.0215,
+      "stage": 0
+    },
+    {
+      "step": 40,
+      "performance": 0.5,
+      "loss": 0.0214,
+      "stage": 0
+    },
+    {
+      "step": 41,
+      "performance": 0.5,
+      "loss": 0.0116,
+      "stage": 0
+    },
+    {
+      "step": 42,
+      "performance": 0.5,
+      "loss": 0.012,
+      "stage": 0
+    },
+    {
+      "step": 43,
+      "performance": 0.5,
+      "loss": 0.0165,
+      "stage": 0
+    },
+    {
+      "step": 44,
+      "performance": 0.5,
+      "loss": 0.0126,
+      "stage": 0
+    },
+    {
+      "step": 45,
+      "performance": 0.5,
+      "loss": 0.0105,
+      "stage": 0
+    },
+    {
+      "step": 46,
+      "performance": 0.5,
+      "loss": 0.0203,
+      "stage": 0
+    },
+    {
+      "step": 47,
+      "performance": 0.5,
+      "loss": 0.0214,
+      "stage": 0
+    },
+    {
+      "step": 48,
+      "performance": 0.5,
+      "loss": 0.0206,
+      "stage": 0
+    },
+    {
+      "step": 49,
+      "performance": 0.5,
+      "loss": 0.0256,
+      "stage": 0
+    },
+    {
+      "step": 50,
+      "performance": 0.5,
+      "loss": 0.0237,
+      "stage": 0
+    },
+    {
+      "step": 51,
+      "performance": 0.5,
+      "loss": 0.0284,
+      "stage": 0
+    },
+    {
+      "step": 52,
+      "performance": 0.5,
+      "loss": 0.0253,
+      "stage": 0
+    },
+    {
+      "step": 53,
+      "performance": 0.5,
+      "loss": 0.0219,
+      "stage": 0
+    },
+    {
+      "step": 54,
+      "performance": 0.5,
+      "loss": 0.0206,
+      "stage": 0
+    },
+    {
+      "step": 55,
+      "performance": 0.5,
+      "loss": 0.0191,
+      "stage": 0
+    },
+    {
+      "step": 56,
+      "performance": 0.5,
+      "loss": 0.0172,
+      "stage": 0
+    },
+    {
+      "step": 57,
+      "performance": 0.5,
+      "loss": 0.0248,
+      "stage": 0
+    },
+    {
+      "step": 58,
+      "performance": 0.5,
+      "loss": 0.0249,
+      "stage": 0
+    },
+    {
+      "step": 59,
+      "performance": 0.5,
+      "loss": 0.02,
+      "stage": 0
+    },
+    {
+      "step": 60,
+      "performance": 0.5,
+      "loss": 0.0171,
+      "stage": 0
+    },
+    {
+      "step": 61,
+      "performance": 0.5,
+      "loss": 0.0264,
+      "stage": 0
+    },
+    {
+      "step": 62,
+      "performance": 0.5,
+      "loss": 0.0197,
+      "stage": 0
+    },
+    {
+      "step": 63,
+      "performance": 0.5,
+      "loss": 0.0185,
+      "stage": 0
+    },
+    {
+      "step": 64,
+      "performance": 0.5,
+      "loss": 0.0158,
+      "stage": 0
+    },
+    {
+      "step": 65,
+      "performance": 0.5,
+      "loss": 0.0184,
+      "stage": 0
+    },
+    {
+      "step": 66,
+      "performance": 0.5,
+      "loss": 0.0124,
+      "stage": 0
+    },
+    {
+      "step": 67,
+      "performance": 0.5,
+      "loss": 0.0123,
+      "stage": 0
+    },
+    {
+      "step": 68,
+      "performance": 0.5,
+      "loss": 0.0172,
+      "stage": 0
+    },
+    {
+      "step": 69,
+      "performance": 0.5,
+      "loss": 0.0154,
+      "stage": 0
+    },
+    {
+      "step": 70,
+      "performance": 0.5,
+      "loss": 0.0135,
+      "stage": 0
+    },
+    {
+      "step": 71,
+      "performance": 0.5,
+      "loss": 0.0169,
+      "stage": 0
+    },
+    {
+      "step": 72,
+      "performance": 0.5,
+      "loss": 0.0131,
+      "stage": 0
+    },
+    {
+      "step": 73,
+      "performance": 0.5,
+      "loss": 0.021,
+      "stage": 0
+    },
+    {
+      "step": 74,
+      "performance": 0.5,
+      "loss": 0.0121,
+      "stage": 0
+    },
+    {
+      "step": 75,
+      "performance": 0.5,
+      "loss": 0.0121,
+      "stage": 0
+    },
+    {
+      "step": 76,
+      "performance": 0.5,
+      "loss": 0.0108,
+      "stage": 0
+    },
+    {
+      "step": 77,
+      "performance": 0.5,
+      "loss": 0.0156,
+      "stage": 0
+    },
+    {
+      "step": 78,
+      "performance": 0.5,
+      "loss": 0.0141,
+      "stage": 0
+    },
+    {
+      "step": 79,
+      "performance": 0.5,
+      "loss": 0.0151,
+      "stage": 0
+    },
+    {
+      "step": 80,
+      "performance": 0.5,
+      "loss": 0.0168,
+      "stage": 0
+    },
+    {
+      "step": 81,
+      "performance": 0.5,
+      "loss": 0.01,
+      "stage": 0
+    },
+    {
+      "step": 82,
+      "performance": 0.5,
+      "loss": 0.0117,
+      "stage": 0
+    },
+    {
+      "step": 83,
+      "performance": 0.5,
+      "loss": 0.0117,
+      "stage": 0
+    },
+    {
+      "step": 84,
+      "performance": 0.5,
+      "loss": 0.0148,
+      "stage": 0
+    },
+    {
+      "step": 85,
+      "performance": 0.5,
+      "loss": 0.0168,
+      "stage": 0
+    },
+    {
+      "step": 86,
+      "performance": 0.5,
+      "loss": 0.0105,
+      "stage": 0
+    },
+    {
+      "step": 87,
+      "performance": 0.5,
+      "loss": 0.0103,
+      "stage": 0
+    },
+    {
+      "step": 88,
+      "performance": 0.5,
+      "loss": 0.0133,
+      "stage": 0
+    },
+    {
+      "step": 89,
+      "performance": 0.5,
+      "loss": 0.0115,
+      "stage": 0
+    },
+    {
+      "step": 90,
+      "performance": 0.5,
+      "loss": 0.0125,
+      "stage": 0
+    },
+    {
+      "step": 91,
+      "performance": 0.5,
+      "loss": 0.0099,
+      "stage": 0
+    },
+    {
+      "step": 92,
+      "performance": 0.5,
+      "loss": 0.016,
+      "stage": 0
+    },
+    {
+      "step": 93,
+      "performance": 0.5,
+      "loss": 0.0119,
+      "stage": 0
+    },
+    {
+      "step": 94,
+      "performance": 0.5,
+      "loss": 0.0112,
+      "stage": 0
+    },
+    {
+      "step": 95,
+      "performance": 0.5,
+      "loss": 0.0082,
+      "stage": 0
+    },
+    {
+      "step": 96,
+      "performance": 0.5,
+      "loss": 0.0083,
+      "stage": 0
+    },
+    {
+      "step": 97,
+      "performance": 0.5,
+      "loss": 0.0097,
+      "stage": 0
+    },
+    {
+      "step": 98,
+      "performance": 0.5,
+      "loss": 0.0087,
+      "stage": 0
+    },
+    {
+      "step": 99,
+      "performance": 0.5,
+      "loss": 0.0133,
+      "stage": 0
+    },
+    {
+      "step": 100,
+      "performance": 0.5,
+      "loss": 0.0114,
+      "stage": 0
+    }
+  ],
+  "timestamp": "2025-06-17T18:58:10.066068"
+}

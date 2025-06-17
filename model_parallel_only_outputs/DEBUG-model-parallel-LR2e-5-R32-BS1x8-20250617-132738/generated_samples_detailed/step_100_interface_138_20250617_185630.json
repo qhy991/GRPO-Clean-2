@@ -1,0 +1,36 @@
+{
+  "step": 100,
+  "timestamp_iso": "2025-06-17T18:56:30.943074",
+  "dataset_original_sample_info": {
+    "level": "advanced",
+    "complexity_score": 8.16,
+    "original_problem_desc_for_debug": "Design a Verilog module and a comprehensive testbench for a interface_138 based on the provided reference files. The module should correctly implement the implied functionality and pass all test cases in the testbench.",
+    "testbench_path": "/home/qhy/Research/LLM/GRPO-RV/dataset/E/testbenches/interface_138_testbench.v",
+    "task_id": "interface_138"
+  },
+  "model_input_prompt_preview": "...",
+  "generated_result": {
+    "reasoning": "",
+    "code": "module decalper_eb_ot_sdeen_pot_pi_dehcac_xnilix(\n    input wire [3:0] address,\n    input wire [15:0] data_in,\n    input wire write_enable,\n    input wire clk,\n    input wire rst,\n    output reg [15:0] data_out\n);\n\nalways @(posedge clk or posedge rst) begin\n    if (rst) begin\n        data_out <= 16'h0000;\n    end else if (write_enable) begin\n        data_out <= data_in;\n    end\nend\n\nendmodule\n\nmodule decalper_eb_ot_sdeen_pot_pi_dehcac_xnilix_testbench;\n    reg [3:0] address;\n    reg [15:0] data_in;\n    reg write_enable;\n    reg clk;\n    reg rst;\n    wire [15:0] data_out;\n\n    // Instantiate the Unit Under Test (UUT)\n    decalper_eb_ot_sdeen_pot_pi_dehcac_xnilix uut (\n        .address(address),\n        .data_in(data_in),\n        .write_enable(write_enable),\n        .clk(clk),\n        .rst(rst),\n        .data_out(data_out)\n    );\n\n    // Clock generation\n    always #5 clk = ~clk;\n\n    initial begin\n        // Initialize inputs\n        address = 4'b0000;\n        data_in = 16'h0000;\n        write_enable = 1'b0;\n        clk = 1'b0;\n        rst = 1'b1;\n\n        // Wait for global reset\n        #100;\n        rst = 1'b0;\n\n        // Test case 1: Write operation\n        address = 4'b0001;\n        data_in = 16'h1234;\n        write_enable = 1'b1;\n        #20;\n\n        // Test case 2: Read operation\n        address = 4'b0001;\n        write_enable = 1'b0;\n        #20;\n\n        // Test case 3: Write operation with different address\n        address = 4'b0010;\n        data_in = 16'h5678;\n        write_enable = 1'b1;\n        #20;\n\n        // Test case 4: Read operation with different address\n        address = 4'b0010;\n        write_enable = 1'b0;\n        #20;\n\n        // Test case 5: Write operation with same address\n        address = 4'b0001;\n        data_in = 16'hABCD;\n        write_enable = 1'b1;\n        #20;\n\n        // Test case 6: Read operation with same address\n        address = 4'b0001;\n        write_enable = 1'b0;\n        #20;\n\n        // End simulation\n        $finish;\n    end\n\n    // Monitor results\n    initial begin\n        $monitor(\"Time=%0t address=%b data_in=%h write_enable=%b data_out=%h\",\n                 $time, address, data_in, write_enable, data_out);\n    end\n\nendmodule\n```",
+    "raw_output_preview": "```verilog\nmodule decalper_eb_ot_sdeen_pot_pi_dehcac_xnilix(\n    input wire [3:0] address,\n    input wire [15:0] data_in,\n    input wire write_enable,\n    input wire clk,\n    input wire rst,\n    output reg [15:0] data_out\n);\n\nalways @(posedge clk or posedge rst) begin\n    if (rst) begin\n        data...",
+    "generation_time_seconds": 0.0
+  },
+  "simulation_details": {
+    "compilation_success": false,
+    "simulation_run_success": false,
+    "parsing_success": false,
+    "passed_tests": 0,
+    "failed_tests": 0,
+    "total_tests_in_output": 0,
+    "all_tests_passed_by_tb": false,
+    "error_message": "Icarus Verilog compilation failed. Exit: 2. Stderr: /tmp/tmp1oip9oh2/design_under_test.v:97: syntax error\nI give up.\n",
+    "raw_stdout": "IVERILOG COMPILE STDOUT:\n\n",
+    "raw_stderr": "IVERILOG COMPILE STDERR:\n/tmp/tmp1oip9oh2/design_under_test.v:97: syntax error\nI give up.\n\n",
+    "quality_metrics": {
+      "complexity": 0.30000000000000004,
+      "readability": 0.5962962962962963,
+      "efficiency": 0.7,
+      "structure": 1.0
+    }
+  }
+}
