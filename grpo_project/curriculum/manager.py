@@ -59,17 +59,38 @@ class EnhancedCurriculumManager:
     def get_curriculum_state(self) -> Dict[str, Any]:
         return {
             "current_stage": self.current_stage,
+            "current_round": self.current_round,
+            "completed_rounds": self.completed_rounds,
             "stage_performance_history": self.stage_performance_history,
-            "stage_start_steps": self.stage_start_steps,
-            "stage_statistics": self.stage_statistics
+            "all_stage_history": self.all_stage_history,
+            "round_history": self.round_history,
+            "stage_statistics": self.stage_statistics,
+            "threshold_multiplier": self.threshold_multiplier,
+            "advancement_attempts": self.advancement_attempts,
+            "successful_advancements": self.successful_advancements,
+            "total_advancement_checks": self.total_advancement_checks
         }
 
     def load_curriculum_state(self, state_dict: Dict[str, Any]):
         self.current_stage = state_dict.get("current_stage", 0)
+        self.current_round = state_dict.get("current_round", 1)
+        self.completed_rounds = state_dict.get("completed_rounds", 0)
         self.stage_performance_history = state_dict.get("stage_performance_history", [])
-        self.stage_start_steps = state_dict.get("stage_start_steps", {})
+        self.all_stage_history = state_dict.get("all_stage_history", [])
+        self.round_history = state_dict.get("round_history", [])
         self.stage_statistics = state_dict.get("stage_statistics", [])
-        logger.info(f"EnhancedCurriculumManager state loaded. Current stage: {self.current_stage}")
+        self.threshold_multiplier = state_dict.get("threshold_multiplier", 1.0)
+        self.advancement_attempts = state_dict.get("advancement_attempts", 0)
+        self.successful_advancements = state_dict.get("successful_advancements", 0)
+        self.total_advancement_checks = state_dict.get("total_advancement_checks", 0)
+        
+        self._log_debug(f"📚 FixedEnhancedCurriculumManager 状态已恢复")
+        self._log_debug(f"  - 当前阶段: {self.current_stage}")
+        self._log_debug(f"  - 当前轮次: {self.current_round}")
+        self._log_debug(f"  - 已完成轮次: {self.completed_rounds}")
+        self._log_debug(f"  - 进阶统计: {self.successful_advancements}/{self.advancement_attempts}")
+        
+        logger.info(f"FixedEnhancedCurriculumManager state loaded. Current stage: {self.current_stage}, Round: {self.current_round}")
 
     def get_current_stage_name(self) -> str:
         """Get the name of the current curriculum stage"""
@@ -90,7 +111,7 @@ class EnhancedCurriculumManager:
 
 # Moved from curriculum_debug_config.py
 class FixedEnhancedCurriculumManager:
-    """修复版本的增强课程学习管理器 - 增强调试日志"""
+    """修复版本的增强课程学习管理器 - 增强调试日志 + 循环训练功能"""
     
     def __init__(self, curriculum_stages: List[CurriculumStageConfig], dataset: Dataset):
         self.curriculum_stages = curriculum_stages
@@ -107,15 +128,24 @@ class FixedEnhancedCurriculumManager:
         self.advancement_attempts = 0
         self.successful_advancements = 0
         
-        self._log_debug("🚀 FixedEnhancedCurriculumManager 开始初始化")
+        # 🔄 新增：循环训练相关变量
+        self.current_round = 1  # 当前是第几轮训练
+        self.max_rounds = 5     # 最大轮次数 (可配置)
+        self.completed_rounds = 0  # 完成的轮次数
+        self.round_history = []    # 每轮的完成历史
+        self.threshold_multiplier = 1.0  # 阈值倍数，每轮递增
+        self.threshold_increment = 0.1   # 每轮阈值增加量
+        
+        self._log_debug("🚀 FixedEnhancedCurriculumManager 开始初始化 (支持循环训练)")
         self._log_debug(f"📊 课程配置: 总阶段数={len(curriculum_stages)}, 数据集大小={len(dataset)}")
+        self._log_debug(f"🔄 循环训练配置: 最大轮次={self.max_rounds}, 阈值递增={self.threshold_increment}")
         
         # 详细记录每个阶段的配置
         for i, stage in enumerate(curriculum_stages):
             self._log_debug(f"  阶段{i} ({stage.name}):")
             self._log_debug(f"    - 等级: {stage.dataset_levels}")
             self._log_debug(f"    - 复杂度: {stage.complexity_range}")
-            self._log_debug(f"    - 性能阈值: {stage.performance_threshold}")
+            self._log_debug(f"    - 基础性能阈值: {stage.performance_threshold}")
             self._log_debug(f"    - 最小评估: {stage.min_evaluations}")
         
         # Analyze dataset distribution using the static method
@@ -127,6 +157,8 @@ class FixedEnhancedCurriculumManager:
         # 验证当前阶段数据集
         current_dataset = self.get_current_stage_dataset()
         self._log_debug(f"✅ 初始化完成: 当前阶段数据集大小={len(current_dataset)}")
+        self._log_debug(f"🔄 准备开始第{self.current_round}轮训练")
+
     def _validate_curriculum_design(self):
         """验证课程设计的合理性"""
         available_levels = set(self.dataset_distribution['level_counts'].keys())
@@ -173,7 +205,53 @@ class FixedEnhancedCurriculumManager:
         
         # 🔧 额外：每100条调试日志输出一次统计
         if len(self.debug_log) % 100 == 0:
-            logger.info(f"📊 课程调试统计: {len(self.debug_log)} 条日志, 当前阶段={self.current_stage}")
+            logger.info(f"📊 课程调试统计: {len(self.debug_log)} 条日志, 当前阶段={self.current_stage}, 当前轮次={self.current_round}")
+
+    def get_current_threshold(self, stage_index: int = None) -> float:
+        """获取当前轮次的有效性能阈值"""
+        if stage_index is None:
+            stage_index = self.current_stage
+            
+        if stage_index >= len(self.curriculum_stages):
+            return 0.9  # 默认高阈值
+            
+        base_threshold = self.curriculum_stages[stage_index].performance_threshold
+        # 第一轮使用原始阈值，后续轮次递增
+        current_threshold = base_threshold + (self.current_round - 1) * self.threshold_increment
+        
+        # 确保阈值不超过0.95（避免过于苛刻）
+        return min(current_threshold, 0.95)
+    
+    def start_new_round(self):
+        """开始新一轮训练"""
+        self.completed_rounds += 1
+        
+        # 记录上一轮的完整信息
+        round_summary = {
+            'round_number': self.current_round,
+            'completed_stages': len(self.all_stage_history),
+            'total_evaluations': sum(len(h['performance_history']) for h in self.all_stage_history),
+            'completion_timestamp': datetime.now().isoformat(),
+            'stage_history': self.all_stage_history.copy()
+        }
+        self.round_history.append(round_summary)
+        
+        # 开始新轮次
+        self.current_round += 1
+        self.current_stage = 0
+        self.stage_performance_history = []
+        
+        self._log_debug(f"🔄 完成第{self.completed_rounds}轮训练，开始第{self.current_round}轮")
+        self._log_debug(f"📈 新轮次阈值提升: 基础阈值 + {(self.current_round - 1) * self.threshold_increment:.2f}")
+        
+        # 记录新轮次的阈值情况
+        for i, stage in enumerate(self.curriculum_stages):
+            new_threshold = self.get_current_threshold(i)
+            self._log_debug(f"  阶段{i} ({stage.name}): {stage.performance_threshold:.2f} -> {new_threshold:.2f}")
+    
+    def should_continue_curriculum(self) -> bool:
+        """判断是否应该继续课程学习（未达到最大轮次）"""
+        return self.current_round <= self.max_rounds
 
     @staticmethod
     def _calculate_dataset_distribution(dataset: Dataset, log_fn=None) -> Dict[str, Any]:
@@ -212,25 +290,32 @@ class FixedEnhancedCurriculumManager:
         }
 
     def should_advance_stage(self, recent_performance: float) -> bool:
-        """判断是否应该进入下一阶段 - 增强调试版本"""
+        """判断是否应该进入下一阶段 - 增强调试版本 + 循环训练支持"""
         self.total_advancement_checks += 1
         current_step = self.total_advancement_checks  # 简单的步数计数
         
-        self._log_debug(f"🔍 第{self.total_advancement_checks}次进阶检查")
+        self._log_debug(f"🔍 第{self.total_advancement_checks}次进阶检查 (轮次{self.current_round})")
         self._log_debug(f"  - 当前性能: {recent_performance:.4f}")
         self._log_debug(f"  - 当前阶段: {self.current_stage}")
         self._log_debug(f"  - 历史长度: {len(self.stage_performance_history)}")
         self._log_debug(f"  - 历史内容: {[f'{p:.4f}' for p in self.stage_performance_history[-5:]]}")  # 显示最近5次
         
+        # 🔄 检查是否到达最后阶段 - 但不直接返回False，而是考虑循环
         if self.current_stage >= len(self.curriculum_stages) - 1:
-            self._log_debug("❌ 已在最后阶段，不能继续进阶")
-            return False
+            self._log_debug("📍 已在最后阶段，检查是否应该开始新轮次")
+            # 如果还有剩余轮次，将在advance_stage中处理循环
+            # 这里先让正常的阈值检查决定是否"进阶"到新轮次
         
         stage = self.curriculum_stages[self.current_stage]
         self.stage_performance_history.append(recent_performance)
         
+        # 🔧 使用动态阈值
+        current_threshold = self.get_current_threshold()
+        base_threshold = stage.performance_threshold
+        
         self._log_debug(f"  - 性能已记录，新历史长度: {len(self.stage_performance_history)}")
-        self._log_debug(f"  - 阶段配置: {stage.name}, 阈值={stage.performance_threshold}, 最小评估={stage.min_evaluations}")
+        self._log_debug(f"  - 阶段配置: {stage.name}, 基础阈值={base_threshold:.3f}, 当前阈值={current_threshold:.3f}")
+        self._log_debug(f"  - 阈值提升: +{current_threshold - base_threshold:.3f} (轮次{self.current_round})")
         
         # 需要足够的评估次数
         if len(self.stage_performance_history) < stage.min_evaluations:
@@ -244,36 +329,38 @@ class FixedEnhancedCurriculumManager:
         
         self._log_debug(f"  - 最近{recent_window}次性能: {recent_performances}")
         self._log_debug(f"  - 最近平均性能: {recent_avg:.4f}")
-        self._log_debug(f"  - 性能阈值: {stage.performance_threshold}")
+        self._log_debug(f"  - 当前轮次阈值: {current_threshold:.4f}")
         
-        should_advance = recent_avg >= stage.performance_threshold
+        should_advance = recent_avg >= current_threshold
         
         # 🔧 详细记录决策过程
         if should_advance:
             self._log_debug(f"✅ 满足进阶条件!")
-            self._log_debug(f"  - 性能检查: {recent_avg:.4f} >= {stage.performance_threshold} ✅")
+            self._log_debug(f"  - 性能检查: {recent_avg:.4f} >= {current_threshold:.4f} ✅")
             self._log_debug(f"  - 评估检查: {len(self.stage_performance_history)} >= {stage.min_evaluations} ✅")
+            if self.current_stage >= len(self.curriculum_stages) - 1:
+                if self.should_continue_curriculum():
+                    self._log_debug(f"  - 🔄 将触发新轮次 (当前第{self.current_round}轮)")
+                else:
+                    self._log_debug(f"  - 🏁 所有轮次已完成 (共{self.max_rounds}轮)")
         else:
             self._log_debug(f"❌ 不满足进阶条件")
-            if recent_avg < stage.performance_threshold:
-                self._log_debug(f"  - 性能不足: {recent_avg:.4f} < {stage.performance_threshold}")
+            if recent_avg < current_threshold:
+                improvement_needed = current_threshold - recent_avg
+                self._log_debug(f"  - 性能不足: {recent_avg:.4f} < {current_threshold:.4f} (需提升{improvement_needed:.4f})")
             
         self._log_debug(f"  - 进阶决策: {should_advance}")
         return should_advance
 
     def advance_stage(self) -> bool:
-        """进入下一阶段 - 增强调试版本"""
+        """进入下一阶段 - 增强调试版本 + 循环训练支持"""
         self.advancement_attempts += 1
         
-        self._log_debug(f"🎯 第{self.advancement_attempts}次进阶尝试")
-        
-        if self.current_stage >= len(self.curriculum_stages) - 1:
-            self._log_debug("❌ 已在最后阶段，无法进阶")
-            return False
+        self._log_debug(f"🎯 第{self.advancement_attempts}次进阶尝试 (轮次{self.current_round})")
         
         # 记录当前阶段的最终统计
         old_stage = self.current_stage
-        old_stage_name = self.curriculum_stages[old_stage].name
+        old_stage_name = self.curriculum_stages[old_stage].name if old_stage < len(self.curriculum_stages) else "Final"
         
         # 🔧 详细记录进阶前的状态
         self._log_debug(f"📊 进阶前状态统计:")
@@ -294,45 +381,73 @@ class FixedEnhancedCurriculumManager:
         final_stats = {
             'completed_stage': old_stage,
             'stage_name': old_stage_name,
+            'round_number': self.current_round,
             'total_evaluations': len(self.stage_performance_history),
             'final_performance': self.stage_performance_history[-1] if self.stage_performance_history else 0,
             'average_performance': np.mean(self.stage_performance_history) if self.stage_performance_history else 0,
             'performance_history': self.stage_performance_history.copy(),
-            'completion_timestamp': datetime.now().isoformat()
+            'completion_timestamp': datetime.now().isoformat(),
+            'threshold_used': self.get_current_threshold(old_stage)
         }
         
         # 保存到全部历史
         self.all_stage_history.append(final_stats)
         
-        # 进阶到下一阶段
-        self.current_stage += 1
-        self.stage_performance_history = []  # 重置性能历史
-        
-        new_stage_name = self.curriculum_stages[self.current_stage].name if self.current_stage < len(self.curriculum_stages) else "Final"
-        
-        self.successful_advancements += 1
-        
-        self._log_debug(f"🎉 成功进阶!")
-        self._log_debug(f"  - 进阶路径: {old_stage}({old_stage_name}) -> {self.current_stage}({new_stage_name})")
-        self._log_debug(f"  - 成功进阶次数: {self.successful_advancements}/{self.advancement_attempts}")
-        self._log_debug(f"  - 前阶段最终性能: {final_stats['final_performance']:.4f}")
-        
-        # 🔧 详细记录新阶段信息
-        if self.current_stage < len(self.curriculum_stages):
+        # 🔄 关键修改：处理阶段进阶 vs 轮次循环
+        if self.current_stage >= len(self.curriculum_stages) - 1:
+            # 在最后一个阶段，检查是否开始新轮次
+            if self.should_continue_curriculum():
+                # 开始新轮次
+                self._log_debug(f"🔄 完成第{self.current_round}轮最后阶段，开始新轮次")
+                self.start_new_round()
+                new_stage_name = self.curriculum_stages[0].name
+                self.successful_advancements += 1
+                
+                self._log_debug(f"🔄 轮次循环成功!")
+                self._log_debug(f"  - 轮次路径: 第{self.current_round-1}轮阶段{old_stage} -> 第{self.current_round}轮阶段0")
+                self._log_debug(f"  - 成功进阶次数: {self.successful_advancements}/{self.advancement_attempts}")
+                
+                # 显示新轮次的阈值情况
+                new_threshold = self.get_current_threshold(0)
+                base_threshold = self.curriculum_stages[0].performance_threshold
+                self._log_debug(f"📈 新轮次第一阶段:")
+                self._log_debug(f"  - 阶段名称: {new_stage_name}")
+                self._log_debug(f"  - 基础阈值: {base_threshold:.3f}")
+                self._log_debug(f"  - 新轮次阈值: {new_threshold:.3f} (+{new_threshold-base_threshold:.3f})")
+                
+                return True
+            else:
+                # 所有轮次已完成
+                self._log_debug(f"🏁 所有{self.max_rounds}轮训练已完成，课程学习结束")
+                return False
+        else:
+            # 正常阶段进阶
+            self.current_stage += 1
+            self.stage_performance_history = []  # 重置性能历史
+            
+            new_stage_name = self.curriculum_stages[self.current_stage].name
+            self.successful_advancements += 1
+            
+            self._log_debug(f"🎉 成功进阶!")
+            self._log_debug(f"  - 进阶路径: 第{self.current_round}轮阶段{old_stage}({old_stage_name}) -> 第{self.current_round}轮阶段{self.current_stage}({new_stage_name})")
+            self._log_debug(f"  - 成功进阶次数: {self.successful_advancements}/{self.advancement_attempts}")
+            self._log_debug(f"  - 前阶段最终性能: {final_stats['final_performance']:.4f}")
+            
+            # 🔧 详细记录新阶段信息
             new_stage = self.curriculum_stages[self.current_stage]
             new_dataset = self.get_current_stage_dataset()
+            new_threshold = self.get_current_threshold()
             
             self._log_debug(f"📈 新阶段详情:")
             self._log_debug(f"  - 阶段名称: {new_stage.name}")
             self._log_debug(f"  - 目标等级: {new_stage.dataset_levels}")
             self._log_debug(f"  - 复杂度范围: {new_stage.complexity_range}")
-            self._log_debug(f"  - 性能阈值: {new_stage.performance_threshold}")
+            self._log_debug(f"  - 基础阈值: {new_stage.performance_threshold:.3f}")
+            self._log_debug(f"  - 当前轮次阈值: {new_threshold:.3f}")
             self._log_debug(f"  - 数据集大小: {len(new_dataset)}")
             self._log_debug(f"  - 数据集比例: {len(new_dataset)/len(self.full_dataset)*100:.1f}%")
-        else:
-            self._log_debug("🎓 所有阶段已完成!")
-        
-        return True
+            
+            return True
 
     def get_current_stage_dataset(self) -> Dataset:
         """获取当前阶段的数据集 - 增强调试版本"""
@@ -457,6 +572,10 @@ class FixedEnhancedCurriculumManager:
             'dataset_levels': stage.dataset_levels,
             'complexity_range': stage.complexity_range,
             'epochs_ratio': stage.epochs_ratio,
+            'current_round': self.current_round,
+            'completed_rounds': self.completed_rounds,
+            'base_threshold': stage.performance_threshold,
+            'current_threshold': self.get_current_threshold(),
             'performance_threshold': stage.performance_threshold,
             'current_evaluations': len(self.stage_performance_history),
             'min_evaluations': stage.min_evaluations,

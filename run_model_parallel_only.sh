@@ -6,7 +6,7 @@ set -e
 # 🔧 激活conda环境
 echo "🔧 激活ReasoningV环境..."
 source /home/qhy/anaconda3/bin/activate ReasoningV
-
+export http_proxy=http://10.130.148.206:7890 https_proxy=http://10.130.148.206:7890
 # 清除分布式环境变量
 echo "🧹 清除分布式环境变量..."
 unset RANK 2>/dev/null || true
@@ -50,6 +50,21 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 # 配置参数
 export WANDB_PROJECT="VerilogGRPO_ModelParallel_Only"
 export WANDB_ENTITY="qhy0227-tsinghua-university"
+# 课程学习阈值
+CURRICULUM_PERFORMANCE_THRESHOLD_1=0.8
+CURRICULUM_PERFORMANCE_THRESHOLD_2=0.75
+CURRICULUM_PERFORMANCE_THRESHOLD_3=0.7
+CURRICULUM_PERFORMANCE_THRESHOLD_4=0.65
+CURRICULUM_PERFORMANCE_THRESHOLD_5=0.6
+CURRICULUM_MIN_EVALUATIONS=7
+
+# 导出环境变量
+export CURRICULUM_PERFORMANCE_THRESHOLD_1
+export CURRICULUM_PERFORMANCE_THRESHOLD_2
+export CURRICULUM_PERFORMANCE_THRESHOLD_3
+export CURRICULUM_PERFORMANCE_THRESHOLD_4
+export CURRICULUM_PERFORMANCE_THRESHOLD_5
+export CURRICULUM_MIN_EVALUATIONS
 
 BASE_MODEL_NAME_OR_PATH="/home/share/Qwen3-8B/models--Qwen--Qwen3-8B/snapshots/a80f5e57cce20e57b65145f4213844dec1a80834"
 STAGE1_ADAPTER_PATH="/home/share/ReasoningV/Qwen3/ckpts/sft-qwen3-lora-5epoch-origen200k-S1-20250429_211831/checkpoint-34695/"
@@ -114,7 +129,7 @@ DATALOADER_PIN_MEMORY=true  # 启用pin memory加速GPU传输
 DATALOADER_PREFETCH_FACTOR=8 # 增加预取因子
 
 # 🔧 优化GRPO和训练配置
-NUM_GENERATIONS_GRPO=2          # 增加生成数量以提高样本效率
+NUM_GENERATIONS_GRPO=4          # 增加生成数量以提高样本效率
 CALLBACK_NUM_SAMPLES=2          # 增加回调样本数
 CALLBACK_EVAL_EVERY_N_STEPS=25  # 减少评估频率以提高训练效率
 SAVE_STRATEGY="steps"
@@ -137,7 +152,7 @@ ENABLE_CURRICULUM=true
 CURRICULUM_TYPE="multi_stage"
 CURRICULUM_FOCUS_LEVELS="basic intermediate advanced expert master"
 CURRICULUM_COMPLEXITY_EMPHASIS="progressive"
-CURRICULUM_PERFORMANCE_CHECK_INTERVAL=30   # 延长检查间隔（10→50）
+CURRICULUM_PERFORMANCE_CHECK_INTERVAL=40   # 延长检查间隔（10→50）
 # 注意：移除了不支持的参数 CURRICULUM_MIN_STAGE_STEPS, CURRICULUM_ADAPTIVE_THRESHOLDS, CURRICULUM_STAGE_PATIENCE, CURRICULUM_PERFORMANCE_WINDOW
 
 # 经验回放配置

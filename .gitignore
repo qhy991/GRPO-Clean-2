@@ -25,6 +25,7 @@ checkpoints/
 output_data/
 trainer_output/
 grpo_runs_wandb/
+model_parallel_only_outputs/
 grpo_runs_*/
 wandb/
 data/
