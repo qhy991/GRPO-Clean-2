@@ -143,15 +143,8 @@ module {module_name}(...);  // Your implementation code
 endmodule
 ```
 
-**Strict requirements:**
-- The module name must be: `{module_name}`
-- Must include all required ports: {port_desc}
-- The code must be complete and synthesizable
-- Must pass all test cases
-
-**Original problem description:**
+**Module specification:**
 {original_prompt}
-{complexity_context}
 Now, please provide your solution in the strict format specified above:
 """
     return {"prompt": system_instruction, "original_prompt_for_debug": original_prompt}

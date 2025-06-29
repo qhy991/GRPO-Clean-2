@@ -16,20 +16,22 @@ class CurriculumStageConfig:
     performance_threshold: float = 0.6  # 进入下一阶段的性能阈值
     min_evaluations: int = 5           # 最少评估次数
     description: str = ""              # 阶段描述
+    require_full_epoch: bool = True    # 🔧 新增：是否要求完整训练该阶段数据一遍
+    min_steps_per_epoch: int = 10      # 🔧 新增：每个epoch的最少步数
 
 def create_default_curriculum_stages(
     performance_thresholds: Optional[List[float]] = None,
     min_evaluations: int = 5
 ) -> List[CurriculumStageConfig]:
-    """创建默认的双层课程学习阶段
+    """创建默认的双层课程学习阶段 - 修复版：确保完整数据集覆盖
     
     Args:
-        performance_thresholds: 五个阶段的性能阈值列表 [foundation, elementary, intermediate, advanced, expert]
+        performance_thresholds: 六个阶段的性能阈值列表 [foundation, elementary, intermediate, advanced, expert, comprehensive]
         min_evaluations: 最小评估次数
     """
     # 🔧 优先从环境变量读取阈值
     env_thresholds = []
-    for i in range(1, 6):  # 阶段1-5
+    for i in range(1, 7):  # 阶段1-6 (新增comprehensive阶段)
         env_key = f"CURRICULUM_PERFORMANCE_THRESHOLD_{i}"
         env_value = os.environ.get(env_key)
         if env_value:
@@ -49,19 +51,19 @@ def create_default_curriculum_stages(
             logger.warning(f"⚠️ 环境变量 CURRICULUM_MIN_EVALUATIONS 值无效: {env_min_eval}, 使用默认值")
     
     # 优先级：环境变量 > 函数参数 > 默认值
-    if env_thresholds and len(env_thresholds) >= 5:
-        performance_thresholds = env_thresholds[:5]
+    if env_thresholds and len(env_thresholds) >= 6:
+        performance_thresholds = env_thresholds[:6]
         logger.info(f"✅ 使用环境变量中的性能阈值: {performance_thresholds}")
     elif performance_thresholds is None:
-        performance_thresholds = [0.65, 0.60, 0.55, 0.50, 0.45]
+        performance_thresholds = [0.65, 0.60, 0.55, 0.50, 0.45, 0.40]  # 新增第6个阈值
         logger.info(f"📊 使用默认性能阈值: {performance_thresholds}")
     else:
         logger.info(f"📊 使用函数参数中的性能阈值: {performance_thresholds}")
     
     # 确保有足够的阈值
-    if len(performance_thresholds) < 5:
+    if len(performance_thresholds) < 6:
         logger.warning(f"提供的阈值数量不足({len(performance_thresholds)})，使用默认值补充")
-        default_thresholds = [0.65, 0.60, 0.55, 0.50, 0.45]
+        default_thresholds = [0.65, 0.60, 0.55, 0.50, 0.45, 0.40]
         performance_thresholds.extend(default_thresholds[len(performance_thresholds):])
     
     stages = [
@@ -69,28 +71,34 @@ def create_default_curriculum_stages(
             name="foundation",
             dataset_levels=["basic"],
             complexity_range=(0.0, 3.0),
-            epochs_ratio=0.25,
+            epochs_ratio=0.15,  # 减少比例为综合阶段留空间
             performance_threshold=performance_thresholds[0],
             min_evaluations=min_evaluations,
-            description="基础阶段：学习简单的基础级设计"
+            description="基础阶段：学习简单的基础级设计",
+            require_full_epoch=True,  # 🔧 要求完整训练
+            min_steps_per_epoch=20
         ),
         CurriculumStageConfig(
             name="elementary",
             dataset_levels=["basic", "intermediate"],
             complexity_range=(0.0, 5.0),
-            epochs_ratio=0.25,
+            epochs_ratio=0.15,
             performance_threshold=performance_thresholds[1],
             min_evaluations=min_evaluations,
-            description="初级阶段：基础级+简单中级设计"
+            description="初级阶段：基础级+简单中级设计",
+            require_full_epoch=True,  # 🔧 要求完整训练
+            min_steps_per_epoch=25
         ),
         CurriculumStageConfig(
             name="intermediate",
             dataset_levels=["intermediate"],
             complexity_range=(3.0, 7.0),
-            epochs_ratio=0.25,
+            epochs_ratio=0.15,
             performance_threshold=performance_thresholds[2],
             min_evaluations=min_evaluations,
-            description="中级阶段：中等复杂度的中级设计"
+            description="中级阶段：中等复杂度的中级设计",
+            require_full_epoch=True,  # 🔧 要求完整训练
+            min_steps_per_epoch=30
         ),
         CurriculumStageConfig(
             name="advanced",
@@ -99,20 +107,37 @@ def create_default_curriculum_stages(
             epochs_ratio=0.15,
             performance_threshold=performance_thresholds[3],
             min_evaluations=min_evaluations,
-            description="高级阶段：复杂的中级和高级设计"
+            description="高级阶段：复杂的中级和高级设计",
+            require_full_epoch=True,  # 🔧 要求完整训练
+            min_steps_per_epoch=35
         ),
         CurriculumStageConfig(
             name="expert",
             dataset_levels=["advanced", "expert"],
             complexity_range=(7.0, 10.0),
-            epochs_ratio=0.1,
+            epochs_ratio=0.15,
             performance_threshold=performance_thresholds[4],
             min_evaluations=min_evaluations,
-            description="专家阶段：最复杂的高级和专家级设计"
+            description="专家阶段：最复杂的高级和专家级设计",
+            require_full_epoch=True,  # 🔧 要求完整训练
+            min_steps_per_epoch=40
+        ),
+        # 🔧 新增：综合阶段确保所有数据都被使用
+        CurriculumStageConfig(
+            name="comprehensive",
+            dataset_levels=["basic", "intermediate", "advanced", "expert", "master"],  # 包含所有级别
+            complexity_range=(0.0, 10.0),  # 包含所有复杂度
+            epochs_ratio=0.25,  # 给予更多训练时间
+            performance_threshold=performance_thresholds[5],
+            min_evaluations=min_evaluations,
+            description="综合阶段：使用全部数据集进行最终训练和巩固",
+            require_full_epoch=True,  # 🔧 要求完整训练
+            min_steps_per_epoch=50  # 综合阶段需要更多步数
         )
     ]
     
-    logger.info(f"创建了 {len(stages)} 个课程阶段，性能阈值: {performance_thresholds[:5]}")
+    logger.info(f"创建了 {len(stages)} 个课程阶段（包含综合阶段），性能阈值: {performance_thresholds[:6]}")
+    logger.info("✅ 综合阶段将确保整个数据集都被使用")
     return stages
 
 def create_custom_curriculum_stages(

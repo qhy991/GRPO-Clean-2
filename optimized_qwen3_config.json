@@ -1,0 +1,48 @@
+{
+  "model_config": {
+    "model_name_or_path": "/home/share/Qwen3-8B/models--Qwen--Qwen3-8B/snapshots/a80f5e57cce20e57b65145f4213844dec1a80834",
+    "trust_remote_code": true,
+    "use_fast_tokenizer": false,
+    "torch_dtype": "bfloat16"
+  },
+  "training_config": {
+    "learning_rate": 2e-05,
+    "warmup_ratio": 0.1,
+    "lr_scheduler_type": "cosine_with_restarts",
+    "per_device_train_batch_size": 2,
+    "gradient_accumulation_steps": 16,
+    "dataloader_num_workers": 4,
+    "gen_temperature": 0.8,
+    "gen_top_k": 50,
+    "gen_top_p": 0.9,
+    "gen_repetition_penalty": 1.02,
+    "gen_length_penalty": 1.0
+  },
+  "reward_config": {
+    "compilation_success": 3.0,
+    "compilation_failure": -2.0,
+    "simulation_crash": -2.0,
+    "test_pass_base_reward": 2.0,
+    "test_pass_bonus_multiplier": 1.5,
+    "max_functional_reward": 20.0,
+    "all_tests_passed_bonus": 8.0,
+    "functional_weight": 0.8,
+    "efficiency_weight": 0.1,
+    "readability_weight": 0.05,
+    "robustness_weight": 0.05
+  },
+  "curriculum_config": {
+    "curriculum_performance_threshold_1": 0.4,
+    "curriculum_performance_threshold_2": 0.5,
+    "curriculum_performance_threshold_3": 0.6,
+    "curriculum_min_evaluations": 3,
+    "curriculum_performance_check_interval": 3
+  },
+  "guidance_config": {
+    "enable_streaming_guidance": true,
+    "min_reasoning_length": 80,
+    "guidance_trigger_threshold": 30,
+    "max_guidance_attempts": 3,
+    "guidance_tokens_limit": 40
+  }
+}

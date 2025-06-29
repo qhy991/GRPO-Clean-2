@@ -32,6 +32,24 @@ class ScriptConfig:
         metadata={"help": "The dataset split to use (e.g., 'train', 'validation')."}
     )
     
+    # 🎯 分层抽样配置
+    dataset_sample_ratio: Optional[float] = field(
+        default=None,
+        metadata={"help": "Sampling ratio for stratified sampling (e.g., 0.1 for 10%). None uses full dataset."}
+    )
+    stratify_columns: str = field(
+        default="level,category",
+        metadata={"help": "Comma-separated column names for stratified sampling (e.g., 'level,category')."}
+    )
+    min_samples_per_category: int = field(
+        default=1,
+        metadata={"help": "Minimum samples per category in stratified sampling."}
+    )
+    sampling_random_seed: int = field(
+        default=42,
+        metadata={"help": "Random seed for reproducible stratified sampling."}
+    )
+    
     # --- Stage1 Adapter Configuration ---
     stage1_adapter_path: Optional[str] = field(
         default=None,
@@ -131,6 +149,10 @@ class ScriptConfig:
     callback_eval_every_n_steps: int = field(
         default=15, 
         metadata={"help": "Frequency of running InferenceCallback. Reduced for multi-GPU to avoid communication overhead."}
+    )
+    hard_case_monitor_interval: int = field(
+        default=100, 
+        metadata={"help": "Interval for Hard-case monitoring callback execution (in training steps)."}
     )
 
     # 生成参数配置
@@ -489,6 +511,15 @@ class ScriptConfig:
         print(f"\n💾 经验回放:")
         print(f"  - 启用: {'✅' if self.enable_experience_replay else '❌'}")
         print(f"  - 缓冲区大小: {self.experience_buffer_size}")
+        
+        print(f"\n🎯 分层抽样:")
+        if self.dataset_sample_ratio:
+            print(f"  - 启用: ✅ ({self.dataset_sample_ratio*100:.0f}%数据)")
+            print(f"  - 分层字段: {self.stratify_columns}")
+            print(f"  - 最少样本数: {self.min_samples_per_category}")
+            print(f"  - 随机种子: {self.sampling_random_seed}")
+        else:
+            print(f"  - 启用: ❌ (使用全部数据)")
         
         # 内存估算
         memory_info = self.get_memory_estimation()

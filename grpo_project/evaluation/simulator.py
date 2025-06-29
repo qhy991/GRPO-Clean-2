@@ -121,7 +121,7 @@ class VerilogSimulator:
                 else: # Some error or non-zero exit from VVP
                     result["simulation_run_success"] = False
                     vvp_err_msg = f"VVP sim error/non-zero exit. Code: {process_sim.returncode}."
-                    current_error = result.get("error_message", "") or ""
+                    current_error = (str(result.get("error_message") or "") + "\n" + str(err_msg_parse)).strip()
                     result["error_message"] = (current_error + "\n" + vvp_err_msg).strip()
 
                 if result["simulation_run_success"]:
@@ -134,7 +134,7 @@ class VerilogSimulator:
                     else: # Simulation ran but output was not parsable for test counts
                         result["parsing_success"] = False
                         err_msg_parse = "Could not parse VVP output for test counts, or 0 tests reported."
-                        current_error = result.get("error_message", "") or ""
+                        current_error = (str(result.get("error_message") or "") + "\n" + str(err_msg_parse)).strip()
                         result["error_message"] = (current_error + "\n" + err_msg_parse).strip()
                         logger.warning(f"SIMULATOR: {err_msg_parse} for {prompt_identifier}")
 
@@ -145,11 +145,11 @@ class VerilogSimulator:
 
             except subprocess.TimeoutExpired:
                 result["simulation_run_success"] = False
-                current_error = result.get("error_message", "") or ""
+                current_error = (str(result.get("error_message") or "") + "\n" + str(err_msg_parse)).strip()
                 result["error_message"] = (current_error + "\n" + "VVP simulation timed out.").strip()
             except Exception as e:
                 result["simulation_run_success"] = False
-                current_error = result.get("error_message", "") or ""
+                current_error = (str(result.get("error_message") or "") + "\n" + str(err_msg_parse)).strip()
                 result["error_message"] = (current_error + "\n" + f"Error during VVP execution: {str(e)}").strip()
 
         if print_simulation_details:

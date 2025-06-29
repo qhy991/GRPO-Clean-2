@@ -136,7 +136,14 @@ class FixedEnhancedCurriculumManager:
         self.threshold_multiplier = 1.0  # 阈值倍数，每轮递增
         self.threshold_increment = 0.1   # 每轮阈值增加量
         
-        self._log_debug("🚀 FixedEnhancedCurriculumManager 开始初始化 (支持循环训练)")
+        # 🔧 新增：完整epoch训练跟踪
+        self.stage_training_tracker = {}  # 跟踪每个阶段的训练进度
+        self.current_stage_start_step = 0  # 当前阶段开始的步数
+        self.stage_dataset_size = 0  # 当前阶段数据集大小
+        self.stage_steps_completed = 0  # 当前阶段已完成步数
+        self.stage_epochs_completed = 0  # 当前阶段已完成的epoch数
+        
+        self._log_debug("🚀 FixedEnhancedCurriculumManager 开始初始化 (支持循环训练+完整epoch要求)")
         self._log_debug(f"📊 课程配置: 总阶段数={len(curriculum_stages)}, 数据集大小={len(dataset)}")
         self._log_debug(f"🔄 循环训练配置: 最大轮次={self.max_rounds}, 阈值递增={self.threshold_increment}")
         
@@ -147,6 +154,8 @@ class FixedEnhancedCurriculumManager:
             self._log_debug(f"    - 复杂度: {stage.complexity_range}")
             self._log_debug(f"    - 基础性能阈值: {stage.performance_threshold}")
             self._log_debug(f"    - 最小评估: {stage.min_evaluations}")
+            self._log_debug(f"    - 要求完整epoch: {getattr(stage, 'require_full_epoch', False)}")
+            self._log_debug(f"    - 最小步数/epoch: {getattr(stage, 'min_steps_per_epoch', 10)}")
         
         # Analyze dataset distribution using the static method
         self.dataset_distribution = FixedEnhancedCurriculumManager._calculate_dataset_distribution(self.full_dataset, self._log_debug)
@@ -158,9 +167,12 @@ class FixedEnhancedCurriculumManager:
         current_dataset = self.get_current_stage_dataset()
         self._log_debug(f"✅ 初始化完成: 当前阶段数据集大小={len(current_dataset)}")
         self._log_debug(f"🔄 准备开始第{self.current_round}轮训练")
+        
+        # 🔧 初始化当前阶段的训练跟踪
+        self._initialize_stage_tracker()
 
     def _validate_curriculum_design(self):
-        """验证课程设计的合理性"""
+        """验证课程设计的合理性 - 增强版：检查数据集覆盖率"""
         available_levels = set(self.dataset_distribution['level_counts'].keys())
         covered_levels = set()
         
@@ -170,6 +182,7 @@ class FixedEnhancedCurriculumManager:
         uncovered_levels = available_levels - covered_levels
         if uncovered_levels:
             self._log_debug(f"⚠️ 未覆盖的数据集等级: {uncovered_levels}")
+            self._log_debug("🔧 建议：添加comprehensive阶段或修改现有阶段配置")
         
         total_ratio = sum(stage.epochs_ratio for stage in self.curriculum_stages)
         # Ensure epochs_ratio exists and is a float, provide default if not
@@ -177,6 +190,102 @@ class FixedEnhancedCurriculumManager:
 
         if abs(total_ratio - 1.0) > 0.01: # Assuming a default of 0.0 if attribute missing
             self._log_debug(f"⚠️ Epoch比例总和: {total_ratio:.3f} (应该接近1.0)")
+        
+        # 🔧 新增：详细的数据集覆盖率分析
+        self._analyze_dataset_coverage()
+
+    def _analyze_dataset_coverage(self):
+        """分析数据集覆盖率"""
+        self._log_debug("🔍 开始数据集覆盖率分析...")
+        
+        total_samples = len(self.full_dataset)
+        covered_samples = set()
+        stage_coverage = {}
+        
+        for stage_idx, stage in enumerate(self.curriculum_stages):
+            stage_indices = []
+            
+            for i, example in enumerate(self.full_dataset):
+                # 检查是否符合当前阶段条件
+                example_level = example.get('level', 'unknown').lower()
+                complexity = example.get('complexity_score', 5.0)
+                
+                # 等级匹配
+                if example_level in [level.lower() for level in stage.dataset_levels]:
+                    # 复杂度匹配
+                    min_complexity, max_complexity = stage.complexity_range
+                    if min_complexity <= complexity <= max_complexity:
+                        stage_indices.append(i)
+                        covered_samples.add(i)
+            
+            stage_coverage[stage.name] = {
+                'indices': stage_indices,
+                'count': len(stage_indices),
+                'ratio': len(stage_indices) / total_samples if total_samples > 0 else 0
+            }
+            
+            self._log_debug(f"  阶段 {stage.name}: {len(stage_indices)} 样本 ({len(stage_indices)/total_samples*100:.1f}%)")
+        
+        # 总覆盖率统计
+        total_covered = len(covered_samples)
+        uncovered_count = total_samples - total_covered
+        coverage_ratio = total_covered / total_samples if total_samples > 0 else 0
+        
+        self._log_debug(f"📊 总体覆盖率分析:")
+        self._log_debug(f"  - 总样本数: {total_samples}")
+        self._log_debug(f"  - 已覆盖样本: {total_covered} ({coverage_ratio*100:.1f}%)")
+        self._log_debug(f"  - 未覆盖样本: {uncovered_count} ({(1-coverage_ratio)*100:.1f}%)")
+        
+        if uncovered_count > 0:
+            self._log_debug(f"⚠️ 警告：{uncovered_count} 个样本未被任何阶段覆盖!")
+            self._analyze_uncovered_samples(covered_samples)
+        else:
+            self._log_debug("✅ 所有样本都被至少一个阶段覆盖")
+        
+        # 保存覆盖率信息
+        self.coverage_analysis = {
+            'total_samples': total_samples,
+            'covered_samples': total_covered,
+            'coverage_ratio': coverage_ratio,
+            'stage_coverage': stage_coverage,
+            'uncovered_count': uncovered_count
+        }
+
+    def _analyze_uncovered_samples(self, covered_samples: set):
+        """分析未覆盖的样本"""
+        uncovered_indices = []
+        uncovered_levels = {}
+        uncovered_complexities = []
+        
+        for i, example in enumerate(self.full_dataset):
+            if i not in covered_samples:
+                uncovered_indices.append(i)
+                
+                level = example.get('level', 'unknown').lower()
+                complexity = example.get('complexity_score', 5.0)
+                
+                uncovered_levels[level] = uncovered_levels.get(level, 0) + 1
+                uncovered_complexities.append(complexity)
+        
+        self._log_debug(f"🔍 未覆盖样本分析:")
+        self._log_debug(f"  - 按等级分布:")
+        for level, count in uncovered_levels.items():
+            self._log_debug(f"    {level}: {count} 样本")
+        
+        if uncovered_complexities:
+            import numpy as np
+            self._log_debug(f"  - 复杂度分布:")
+            self._log_debug(f"    最小: {np.min(uncovered_complexities):.2f}")
+            self._log_debug(f"    最大: {np.max(uncovered_complexities):.2f}")
+            self._log_debug(f"    平均: {np.mean(uncovered_complexities):.2f}")
+            self._log_debug(f"    中位数: {np.median(uncovered_complexities):.2f}")
+        
+        # 保存未覆盖样本信息
+        self.uncovered_analysis = {
+            'indices': uncovered_indices,
+            'levels': uncovered_levels,
+            'complexities': uncovered_complexities
+        }
 
     def _log_detailed_distribution(self):
         """Logs the detailed dataset distribution after analysis."""
@@ -289,10 +398,13 @@ class FixedEnhancedCurriculumManager:
             'total_samples': len(dataset)
         }
 
-    def should_advance_stage(self, recent_performance: float) -> bool:
-        """判断是否应该进入下一阶段 - 增强调试版本 + 循环训练支持"""
+    def should_advance_stage(self, recent_performance: float, current_step: int = None) -> bool:
+        """判断是否应该进入下一阶段 - 增强调试版本 + 循环训练支持 + 完整epoch要求"""
         self.total_advancement_checks += 1
-        current_step = self.total_advancement_checks  # 简单的步数计数
+        
+        # 🔧 更新训练进度
+        if current_step is not None:
+            self.update_training_progress(current_step)
         
         self._log_debug(f"🔍 第{self.total_advancement_checks}次进阶检查 (轮次{self.current_round})")
         self._log_debug(f"  - 当前性能: {recent_performance:.4f}")
@@ -317,9 +429,27 @@ class FixedEnhancedCurriculumManager:
         self._log_debug(f"  - 阶段配置: {stage.name}, 基础阈值={base_threshold:.3f}, 当前阈值={current_threshold:.3f}")
         self._log_debug(f"  - 阈值提升: +{current_threshold - base_threshold:.3f} (轮次{self.current_round})")
         
+        # 🔧 新增：检查完整epoch训练要求
+        is_training_complete = self.is_stage_training_complete()
+        training_status = self.get_stage_training_status()
+        
+        self._log_debug(f"📊 完整训练检查:")
+        self._log_debug(f"  - 要求完整epoch: {training_status.get('require_full_epoch', False)}")
+        self._log_debug(f"  - 训练进度: {training_status.get('progress_percent', 0):.1f}%")
+        self._log_debug(f"  - 已完成epoch: {training_status.get('epochs_completed', 0):.2f}")
+        self._log_debug(f"  - 已完成步数: {training_status.get('steps_completed', 0)}")
+        self._log_debug(f"  - 完整训练要求满足: {is_training_complete}")
+        
         # 需要足够的评估次数
         if len(self.stage_performance_history) < stage.min_evaluations:
             self._log_debug(f"❌ 评估次数不足: {len(self.stage_performance_history)}/{stage.min_evaluations}")
+            return False
+        
+        # 🔧 新增：检查完整训练要求
+        if not is_training_complete:
+            self._log_debug(f"❌ 完整训练要求未满足")
+            self._log_debug(f"  - 需要完成至少1个完整epoch的训练")
+            self._log_debug(f"  - 当前进度: {training_status.get('epochs_completed', 0):.2f}/1.0 epoch")
             return False
         
         # 检查最近的性能表现
@@ -338,6 +468,7 @@ class FixedEnhancedCurriculumManager:
             self._log_debug(f"✅ 满足进阶条件!")
             self._log_debug(f"  - 性能检查: {recent_avg:.4f} >= {current_threshold:.4f} ✅")
             self._log_debug(f"  - 评估检查: {len(self.stage_performance_history)} >= {stage.min_evaluations} ✅")
+            self._log_debug(f"  - 完整训练检查: {is_training_complete} ✅")
             if self.current_stage >= len(self.curriculum_stages) - 1:
                 if self.should_continue_curriculum():
                     self._log_debug(f"  - 🔄 将触发新轮次 (当前第{self.current_round}轮)")
@@ -353,7 +484,7 @@ class FixedEnhancedCurriculumManager:
         return should_advance
 
     def advance_stage(self) -> bool:
-        """进入下一阶段 - 增强调试版本 + 循环训练支持"""
+        """进入下一阶段 - 增强调试版本 + 循环训练支持 + 完整epoch跟踪"""
         self.advancement_attempts += 1
         
         self._log_debug(f"🎯 第{self.advancement_attempts}次进阶尝试 (轮次{self.current_round})")
@@ -366,6 +497,15 @@ class FixedEnhancedCurriculumManager:
         self._log_debug(f"📊 进阶前状态统计:")
         self._log_debug(f"  - 离开阶段: {old_stage} ({old_stage_name})")
         self._log_debug(f"  - 该阶段评估次数: {len(self.stage_performance_history)}")
+        
+        # 🔧 记录完整训练状态
+        training_status = self.get_stage_training_status()
+        if training_status and training_status.get('status') != 'no_tracker':
+            self._log_debug(f"  - 完整训练状态:")
+            self._log_debug(f"    已完成epoch: {training_status.get('epochs_completed', 0):.2f}")
+            self._log_debug(f"    已完成步数: {training_status.get('steps_completed', 0)}")
+            self._log_debug(f"    训练进度: {training_status.get('progress_percent', 0):.1f}%")
+            self._log_debug(f"    epoch要求满足: {training_status.get('is_epoch_requirement_met', False)}")
         
         if self.stage_performance_history:
             final_performance = self.stage_performance_history[-1]
@@ -387,7 +527,8 @@ class FixedEnhancedCurriculumManager:
             'average_performance': np.mean(self.stage_performance_history) if self.stage_performance_history else 0,
             'performance_history': self.stage_performance_history.copy(),
             'completion_timestamp': datetime.now().isoformat(),
-            'threshold_used': self.get_current_threshold(old_stage)
+            'threshold_used': self.get_current_threshold(old_stage),
+            'training_status': training_status  # 🔧 新增：保存训练状态
         }
         
         # 保存到全部历史
@@ -414,6 +555,10 @@ class FixedEnhancedCurriculumManager:
                 self._log_debug(f"  - 阶段名称: {new_stage_name}")
                 self._log_debug(f"  - 基础阈值: {base_threshold:.3f}")
                 self._log_debug(f"  - 新轮次阈值: {new_threshold:.3f} (+{new_threshold-base_threshold:.3f})")
+                
+                # 🔧 重新初始化训练跟踪器
+                self.current_stage_start_step = 0  # 这需要从外部更新
+                self._initialize_stage_tracker()
                 
                 return True
             else:
@@ -446,6 +591,11 @@ class FixedEnhancedCurriculumManager:
             self._log_debug(f"  - 当前轮次阈值: {new_threshold:.3f}")
             self._log_debug(f"  - 数据集大小: {len(new_dataset)}")
             self._log_debug(f"  - 数据集比例: {len(new_dataset)/len(self.full_dataset)*100:.1f}%")
+            self._log_debug(f"  - 要求完整epoch: {getattr(new_stage, 'require_full_epoch', True)}")
+            
+            # 🔧 重新初始化训练跟踪器
+            self.current_stage_start_step = 0  # 这需要从外部更新
+            self._initialize_stage_tracker()
             
             return True
 
@@ -759,6 +909,188 @@ class FixedEnhancedCurriculumManager:
         self.log_periodic_status()
         
         self._log_debug("🔧 强制调试输出结束")
+
+    def _initialize_stage_tracker(self):
+        """初始化阶段训练跟踪"""
+        if self.current_stage < len(self.curriculum_stages):
+            stage = self.curriculum_stages[self.current_stage]
+            current_dataset = self.get_current_stage_dataset()
+            self.stage_dataset_size = len(current_dataset)
+            
+            # 计算该阶段需要的最少步数
+            min_steps = getattr(stage, 'min_steps_per_epoch', 10)
+            require_full_epoch = getattr(stage, 'require_full_epoch', True)
+            
+            if require_full_epoch:
+                # 计算完整训练一遍需要的步数（假设batch_size=1）
+                estimated_steps_per_epoch = max(self.stage_dataset_size, min_steps)
+            else:
+                estimated_steps_per_epoch = min_steps
+            
+            self.stage_training_tracker = {
+                'stage_name': stage.name,
+                'stage_index': self.current_stage,
+                'dataset_size': self.stage_dataset_size,
+                'require_full_epoch': require_full_epoch,
+                'min_steps_per_epoch': min_steps,
+                'estimated_steps_per_epoch': estimated_steps_per_epoch,
+                'target_epochs': 1 if require_full_epoch else 0,
+                'steps_completed': 0,
+                'epochs_completed': 0,
+                'start_step': self.current_stage_start_step,
+                'is_epoch_requirement_met': False
+            }
+            
+            self._log_debug(f"🔧 初始化阶段{self.current_stage}训练跟踪:")
+            self._log_debug(f"  - 阶段名称: {stage.name}")
+            self._log_debug(f"  - 数据集大小: {self.stage_dataset_size}")
+            self._log_debug(f"  - 要求完整epoch: {require_full_epoch}")
+            self._log_debug(f"  - 预估每epoch步数: {estimated_steps_per_epoch}")
+            self._log_debug(f"  - 最小步数要求: {min_steps}")
+        else:
+            self.stage_training_tracker = {}
+
+    def update_training_progress(self, current_step: int):
+        """更新训练进度"""
+        if not self.stage_training_tracker:
+            return
+            
+        # 计算当前阶段已完成的步数
+        steps_in_stage = current_step - self.stage_training_tracker['start_step']
+        self.stage_training_tracker['steps_completed'] = steps_in_stage
+        
+        # 计算完成的epoch数
+        estimated_steps_per_epoch = self.stage_training_tracker['estimated_steps_per_epoch']
+        if estimated_steps_per_epoch > 0:
+            epochs_completed = steps_in_stage / estimated_steps_per_epoch
+            self.stage_training_tracker['epochs_completed'] = epochs_completed
+            
+            # 检查是否满足完整epoch要求
+            require_full_epoch = self.stage_training_tracker['require_full_epoch']
+            target_epochs = self.stage_training_tracker['target_epochs']
+            
+            if require_full_epoch:
+                self.stage_training_tracker['is_epoch_requirement_met'] = epochs_completed >= target_epochs
+            else:
+                # 如果不要求完整epoch，只要达到最小步数即可
+                min_steps = self.stage_training_tracker['min_steps_per_epoch']
+                self.stage_training_tracker['is_epoch_requirement_met'] = steps_in_stage >= min_steps
+        
+        # 每50步记录一次进度
+        if steps_in_stage % 50 == 0 and steps_in_stage > 0:
+            self._log_training_progress()
+
+    def _log_training_progress(self):
+        """记录训练进度"""
+        if not self.stage_training_tracker:
+            return
+            
+        tracker = self.stage_training_tracker
+        stage_name = tracker['stage_name']
+        steps_completed = tracker['steps_completed']
+        epochs_completed = tracker['epochs_completed']
+        is_met = tracker['is_epoch_requirement_met']
+        
+        self._log_debug(f"📈 阶段{stage_name}训练进度:")
+        self._log_debug(f"  - 已完成步数: {steps_completed}")
+        self._log_debug(f"  - 已完成epoch: {epochs_completed:.2f}")
+        self._log_debug(f"  - epoch要求满足: {is_met}")
+        
+        if tracker['require_full_epoch']:
+            progress_percent = min(100, epochs_completed * 100)
+            self._log_debug(f"  - 完整训练进度: {progress_percent:.1f}%")
+
+    def is_stage_training_complete(self) -> bool:
+        """检查当前阶段是否完成了完整训练要求"""
+        if not self.stage_training_tracker:
+            return True  # 如果没有跟踪器，认为已完成
+            
+        return self.stage_training_tracker.get('is_epoch_requirement_met', False)
+
+    def get_stage_training_status(self) -> Dict[str, Any]:
+        """获取当前阶段训练状态"""
+        if not self.stage_training_tracker:
+            return {'status': 'no_tracker', 'complete': True}
+            
+        tracker = self.stage_training_tracker
+        return {
+            'stage_name': tracker['stage_name'],
+            'stage_index': tracker['stage_index'],
+            'dataset_size': tracker['dataset_size'],
+            'steps_completed': tracker['steps_completed'],
+            'epochs_completed': tracker['epochs_completed'],
+            'require_full_epoch': tracker['require_full_epoch'],
+            'is_epoch_requirement_met': tracker['is_epoch_requirement_met'],
+            'estimated_steps_per_epoch': tracker['estimated_steps_per_epoch'],
+            'progress_percent': min(100, tracker['epochs_completed'] * 100) if tracker['require_full_epoch'] else 100
+        }
+
+    def update_stage_start_step(self, current_step: int):
+        """更新当前阶段开始步数 - 用于阶段进阶时重置步数计数"""
+        self.current_stage_start_step = current_step
+        if self.stage_training_tracker:
+            self.stage_training_tracker['start_step'] = current_step
+            # 重置步数和epoch计数
+            self.stage_training_tracker['steps_completed'] = 0
+            self.stage_training_tracker['epochs_completed'] = 0
+            self.stage_training_tracker['is_epoch_requirement_met'] = False
+            
+        self._log_debug(f"🔧 更新阶段开始步数: {current_step}")
+        self._log_debug(f"  - 重置训练进度跟踪器")
+
+    def get_stage_advancement_requirements(self) -> Dict[str, Any]:
+        """获取当前阶段的进阶要求"""
+        if self.current_stage >= len(self.curriculum_stages):
+            return {'stage_completed': True, 'requirements': []}
+            
+        stage = self.curriculum_stages[self.current_stage]
+        training_status = self.get_stage_training_status()
+        current_threshold = self.get_current_threshold()
+        
+        requirements = []
+        
+        # 性能要求
+        recent_performance = np.mean(self.stage_performance_history[-2:]) if len(self.stage_performance_history) >= 2 else 0
+        performance_met = recent_performance >= current_threshold
+        requirements.append({
+            'type': 'performance',
+            'description': f'平均性能达到 {current_threshold:.3f}',
+            'current': recent_performance,
+            'target': current_threshold,
+            'met': performance_met
+        })
+        
+        # 评估次数要求
+        eval_count_met = len(self.stage_performance_history) >= stage.min_evaluations
+        requirements.append({
+            'type': 'evaluations',
+            'description': f'完成至少 {stage.min_evaluations} 次评估',
+            'current': len(self.stage_performance_history),
+            'target': stage.min_evaluations,
+            'met': eval_count_met
+        })
+        
+        # 完整训练要求
+        training_complete = self.is_stage_training_complete()
+        if training_status.get('require_full_epoch', False):
+            requirements.append({
+                'type': 'full_training',
+                'description': '完成至少1个完整epoch的训练',
+                'current': training_status.get('epochs_completed', 0),
+                'target': 1.0,
+                'met': training_complete,
+                'progress_percent': training_status.get('progress_percent', 0)
+            })
+        
+        all_met = all(req['met'] for req in requirements)
+        
+        return {
+            'stage_name': stage.name,
+            'stage_index': self.current_stage,
+            'can_advance': all_met,
+            'requirements': requirements,
+            'training_status': training_status
+        }
 
 
 # Moved from train.py (setup_curriculum_manager)

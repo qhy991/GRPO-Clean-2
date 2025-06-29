@@ -27,15 +27,24 @@ class EnhancedRewardConfig:
     edge_case_handling_bonus: float = field(default=1.5, metadata={"help": "Bonus for handling edge cases correctly."})
     synthesis_friendly_bonus: float = field(default=1.0, metadata={"help": "Bonus for synthesis-friendly code."})
 
+    # Output length rewards
+    optimal_length_bonus: float = field(default=1.0, metadata={"help": "Bonus for outputs with optimal length."})
+    length_efficiency_threshold: int = field(default=3000, metadata={"help": "Token count below which outputs get efficiency bonus."})
+    length_penalty_threshold: int = field(default=5000, metadata={"help": "Token count above which outputs get penalized."})
+    length_penalty_rate: float = field(default=-0.0005, metadata={"help": "Penalty rate per token above threshold."})
+    min_length_threshold: int = field(default=50, metadata={"help": "Minimum token count to avoid extremely short outputs."})
+    min_length_penalty: float = field(default=-2.0, metadata={"help": "Penalty for outputs below minimum length."})
+
     # Penalty configurations
     timeout_penalty: float = field(default=-3.0, metadata={"help": "Penalty for timeout during simulation."})
     resource_usage_penalty: float = field(default=-0.5, metadata={"help": "Penalty for excessive resource usage."})
 
     # Multi-objective weights
-    functional_weight: float = field(default=0.6, metadata={"help": "Weight for functional correctness in total reward."})
+    functional_weight: float = field(default=0.5, metadata={"help": "Weight for functional correctness in total reward."})
     efficiency_weight: float = field(default=0.2, metadata={"help": "Weight for code efficiency in total reward."})
     readability_weight: float = field(default=0.1, metadata={"help": "Weight for code readability in total reward."})
     robustness_weight: float = field(default=0.1, metadata={"help": "Weight for code robustness in total reward."})
+    length_efficiency_weight: float = field(default=0.1, metadata={"help": "Weight for output length efficiency in total reward."})
 
     # Dynamic reward scaling
     enable_adaptive_scaling: bool = field(default=True, metadata={"help": "Enable adaptive reward scaling based on training progress."})

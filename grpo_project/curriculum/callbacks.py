@@ -205,7 +205,7 @@ class CurriculumProgressCallback(TrainerCallback):
                 self._check_and_advance_stage(performance_estimate, current_step)
 
     def _check_and_advance_stage(self, current_performance: float, current_step: int):
-        """检查并执行阶段进阶 - 简化版本，避免双重判断"""
+        """检查并执行阶段进阶 - 简化版本，避免双重判断 + 完整epoch支持"""
         current_stage_idx = self.curriculum_manager.current_stage
         
         if current_stage_idx >= len(self.curriculum_manager.curriculum_stages):
@@ -218,17 +218,45 @@ class CurriculumProgressCallback(TrainerCallback):
         self._write_debug(f"  - 当前性能: {current_performance:.4f}")
         self._write_debug(f"  - 性能阈值: {stage_config.performance_threshold}")
         
+        # 🔧 新增：获取完整的进阶要求检查
+        advancement_reqs = self.curriculum_manager.get_stage_advancement_requirements()
+        
+        self._write_debug(f"📋 进阶要求检查:")
+        for req in advancement_reqs['requirements']:
+            status = "✅" if req['met'] else "❌"
+            self._write_debug(f"  {status} {req['description']}")
+            current_val = req['current']
+            target_val = req['target']
+            if isinstance(current_val, float):
+                current_str = f"{current_val:.4f}"
+            else:
+                current_str = str(current_val)
+            if isinstance(target_val, float):
+                target_str = f"{target_val:.4f}"
+            else:
+                target_str = str(target_val)
+            self._write_debug(f"    当前: {current_str}")
+            self._write_debug(f"    目标: {target_str}")
+            if req['type'] == 'full_training' and 'progress_percent' in req:
+                self._write_debug(f"    训练进度: {req['progress_percent']:.1f}%")
+        
+        can_advance = advancement_reqs['can_advance']
+        self._write_debug(f"📊 综合进阶判断: {can_advance}")
+        
         # 🔧 修复：统一由课程管理器判断，避免双重逻辑
         try:
             old_stage = current_stage_idx
             
-            # 让课程管理器做唯一的判断
-            if self.curriculum_manager.should_advance_stage(current_performance):
+            # 让课程管理器做唯一的判断 - 传递当前步数用于训练进度更新
+            if self.curriculum_manager.should_advance_stage(current_performance, current_step):
                 success = self.curriculum_manager.advance_stage()
                 
                 if success:
                     new_stage = self.curriculum_manager.current_stage
                     self._write_debug(f"🎯 成功进阶: 阶段{old_stage} -> 阶段{new_stage}")
+                    
+                    # 🔧 重要：更新新阶段的开始步数
+                    self.curriculum_manager.update_stage_start_step(current_step)
                     
                     # 重置阶段计数器
                     self.step_count_in_current_stage = 0
@@ -240,6 +268,7 @@ class CurriculumProgressCallback(TrainerCallback):
                             self._write_debug(f"  - 新阶段名称: {new_stage_info.name}")
                             self._write_debug(f"  - 新阶段数据集大小: {len(new_dataset)}")
                             self._write_debug(f"  - 新阶段目标等级: {new_stage_info.dataset_levels}")
+                            self._write_debug(f"  - 新阶段要求完整epoch: {getattr(new_stage_info, 'require_full_epoch', True)}")
                         except Exception as e:
                             self._write_debug(f"  - 新阶段信息获取部分失败: {e}")
                     else:
@@ -247,7 +276,22 @@ class CurriculumProgressCallback(TrainerCallback):
                 else:
                     self._write_debug("❌ 课程管理器进阶操作失败")
             else:
-                self._write_debug("⏳ 课程管理器判断暂不满足进阶条件")
+                # 详细说明为什么不能进阶
+                unmet_reqs = [req for req in advancement_reqs['requirements'] if not req['met']]
+                if unmet_reqs:
+                    self._write_debug("⏳ 未满足的进阶条件:")
+                    for req in unmet_reqs:
+                        if req['type'] == 'performance':
+                            gap = req['target'] - req['current']
+                            self._write_debug(f"  - 性能差距: 需提升 {gap:.4f}")
+                        elif req['type'] == 'evaluations':
+                            remaining = req['target'] - req['current']
+                            self._write_debug(f"  - 评估次数: 还需 {remaining} 次")
+                        elif req['type'] == 'full_training':
+                            remaining_epochs = req['target'] - req['current']
+                            self._write_debug(f"  - 训练进度: 还需 {remaining_epochs:.2f} epoch ({req.get('progress_percent', 0):.1f}%)")
+                else:
+                    self._write_debug("⏳ 课程管理器判断暂不满足进阶条件")
                 
         except Exception as e:
             self._write_debug(f"❌ 阶段进阶检查失败: {e}")
@@ -351,7 +395,7 @@ class CurriculumProgressCallback(TrainerCallback):
                 self._write_debug(f"  - 当前奖励: {reward:.4f}")
 
     def _wandb_log(self, current_step: int, logs: Optional[Dict[str, float]]):
-        """W&B 记录 - 简化版本"""
+        """W&B 记录 - 简化版本 + 完整epoch训练进度 + 详细数据集使用监控"""
         try:
             import wandb
             if wandb.run is None:
@@ -380,25 +424,210 @@ class CurriculumProgressCallback(TrainerCallback):
                 stage_evaluation_count = len(stage_performances)
                 avg_stage_performance = np.mean(stage_performances) if stage_performances else 0.0
             
+            # 🔧 新增：获取完整训练进度信息
+            training_status = self.curriculum_manager.get_stage_training_status()
+            advancement_reqs = self.curriculum_manager.get_stage_advancement_requirements()
+            
+            # 🔧 新增：计算数据集使用统计
+            full_dataset_size = len(self.curriculum_manager.full_dataset)
+            stage_dataset_coverage = (dataset_size / full_dataset_size * 100) if full_dataset_size > 0 else 0
+            
+            # 🔧 新增：计算累积数据使用情况
+            cumulative_samples_trained = 0
+            cumulative_coverage_percent = 0
+            
+            if training_status and training_status.get('status') != 'no_tracker':
+                steps_completed = training_status.get('steps_completed', 0)
+                estimated_steps_per_epoch = training_status.get('estimated_steps_per_epoch', 1)
+                
+                # 假设每步处理1个样本（实际可能不同，但用于估算）
+                cumulative_samples_trained = steps_completed
+                cumulative_coverage_percent = min(100, (steps_completed / estimated_steps_per_epoch) * 100)
+            
             wandb_data = {
-                "curriculum/current_stage_idx": current_stage_idx,
-                "curriculum/current_stage_name_numeric": current_stage_idx,
-                "curriculum/dataset_size": dataset_size,
-                "curriculum/performance_threshold": performance_threshold,
-                "curriculum/latest_performance": latest_performance,
-                "curriculum/evaluation_count": stage_evaluation_count,
-                "curriculum/stage_step_count": self.step_count_in_current_stage,
-                "curriculum/avg_stage_performance": avg_stage_performance
+                "curriculum/current_stage_idx": int(current_stage_idx),
+                "curriculum/current_stage_name_numeric": int(current_stage_idx),
+                "curriculum/dataset_size": int(dataset_size),
+                "curriculum/performance_threshold": float(performance_threshold),
+                "curriculum/latest_performance": float(latest_performance),
+                "curriculum/evaluation_count": int(stage_evaluation_count),
+                "curriculum/stage_step_count": int(self.step_count_in_current_stage),
+                "curriculum/avg_stage_performance": float(avg_stage_performance),
+                
+                # 🔧 新增：数据集使用情况监控
+                "curriculum/full_dataset_size": int(full_dataset_size),
+                "curriculum/stage_dataset_coverage_percent": float(stage_dataset_coverage),
+                "curriculum/cumulative_samples_trained": int(cumulative_samples_trained),
+                "curriculum/cumulative_coverage_percent": float(cumulative_coverage_percent),
             }
             
-            # 添加更多调试信息
+            # 🔧 新增：完整训练进度指标
+            if training_status and training_status.get('status') != 'no_tracker':
+                epochs_completed = training_status.get('epochs_completed', 0)
+                steps_completed = training_status.get('steps_completed', 0)
+                progress_percent = training_status.get('progress_percent', 0)
+                estimated_steps_per_epoch = training_status.get('estimated_steps_per_epoch', 0)
+                
+                wandb_data.update({
+                    "curriculum/epochs_completed": float(epochs_completed),
+                    "curriculum/steps_completed": int(steps_completed),
+                    "curriculum/training_progress_percent": float(progress_percent),
+                    "curriculum/require_full_epoch": float(training_status.get('require_full_epoch', False)),
+                    "curriculum/epoch_requirement_met": float(training_status.get('is_epoch_requirement_met', False)),
+                    "curriculum/estimated_steps_per_epoch": int(estimated_steps_per_epoch),
+                    
+                    # 🔧 新增：详细的数据使用率指标
+                    "curriculum/samples_per_step": 1.0,  # 假设每步1个样本
+                    "curriculum/estimated_total_samples": int(estimated_steps_per_epoch),
+                    "curriculum/samples_remaining": int(max(0, estimated_steps_per_epoch - steps_completed)),
+                    "curriculum/epoch_completion_ratio": float(min(1.0, epochs_completed)),
+                    
+                    # 🔧 新增：阶段数据使用效率
+                    "curriculum/stage_data_efficiency": float(steps_completed / dataset_size) if dataset_size > 0 else 0.0,
+                    "curriculum/data_reuse_count": float(epochs_completed),
+                })
+                
+                # 🔧 新增：预测剩余训练时间（基于当前进度）
+                if epochs_completed > 0 and progress_percent > 0:
+                    estimated_remaining_steps = int(max(0, estimated_steps_per_epoch - steps_completed))
+                    wandb_data["curriculum/estimated_remaining_steps"] = estimated_remaining_steps
+                    
+                    # 如果有步数历史，可以估算剩余时间
+                    if hasattr(self, 'step_count_in_current_stage') and self.step_count_in_current_stage > 0:
+                        steps_per_training_step = float(steps_completed / self.step_count_in_current_stage) if self.step_count_in_current_stage > 0 else 1.0
+                        estimated_remaining_training_steps = float(estimated_remaining_steps / steps_per_training_step) if steps_per_training_step > 0 else 0.0
+                        wandb_data["curriculum/estimated_remaining_training_steps"] = estimated_remaining_training_steps
+            
+            # 🔧 新增：进阶要求满足情况
+            if advancement_reqs and 'requirements' in advancement_reqs:
+                wandb_data["curriculum/can_advance"] = float(advancement_reqs['can_advance'])
+                
+                # 分别记录各项要求的满足情况
+                for req in advancement_reqs['requirements']:
+                    req_type = req['type']
+                    wandb_data[f"curriculum/{req_type}_requirement_met"] = float(req['met'])
+                    wandb_data[f"curriculum/{req_type}_current"] = req['current']
+                    wandb_data[f"curriculum/{req_type}_target"] = req['target']
+                    
+                    # 🔧 新增：计算每项要求的完成度
+                    if req['target'] > 0:
+                        completion_ratio = min(1.0, req['current'] / req['target'])
+                        wandb_data[f"curriculum/{req_type}_completion_ratio"] = completion_ratio
+            
+            # 🔧 新增：阶段级别的数据分布信息
+            if current_stage_idx < len(self.curriculum_manager.curriculum_stages):
+                stage_config = self.curriculum_manager.curriculum_stages[current_stage_idx]
+                
+                # 记录阶段配置信息
+                wandb_data.update({
+                    "curriculum/stage_complexity_min": float(stage_config.complexity_range[0]),
+                    "curriculum/stage_complexity_max": float(stage_config.complexity_range[1]),
+                    "curriculum/stage_complexity_span": float(stage_config.complexity_range[1] - stage_config.complexity_range[0]),
+                    "curriculum/stage_levels_count": int(len(stage_config.dataset_levels)),
+                    "curriculum/stage_min_evaluations": int(stage_config.min_evaluations),
+                    "curriculum/stage_require_full_epoch": float(getattr(stage_config, 'require_full_epoch', True)),
+                    "curriculum/stage_min_steps_per_epoch": int(getattr(stage_config, 'min_steps_per_epoch', 10)),
+                })
+                
+                # 🔧 修复：将数据级别转换为数值编码，避免文字显示
+                level_mapping = {
+                    'basic': 1.0,
+                    'intermediate': 2.0, 
+                    'advanced': 3.0,
+                    'expert': 4.0,
+                    'master': 5.0
+                }
+                
+                # 记录当前阶段包含的级别（数值形式）
+                stage_levels_encoded = []
+                for level in stage_config.dataset_levels:
+                    level_encoded = level_mapping.get(level.lower(), 0.0)
+                    stage_levels_encoded.append(level_encoded)
+                
+                # 记录级别统计
+                wandb_data.update({
+                    "curriculum/stage_has_basic": float('basic' in [l.lower() for l in stage_config.dataset_levels]),
+                    "curriculum/stage_has_intermediate": float('intermediate' in [l.lower() for l in stage_config.dataset_levels]),
+                    "curriculum/stage_has_advanced": float('advanced' in [l.lower() for l in stage_config.dataset_levels]),
+                    "curriculum/stage_has_expert": float('expert' in [l.lower() for l in stage_config.dataset_levels]),
+                    "curriculum/stage_has_master": float('master' in [l.lower() for l in stage_config.dataset_levels]),
+                    "curriculum/stage_level_diversity": float(len(set(stage_config.dataset_levels))),
+                    "curriculum/stage_min_level": float(min(stage_levels_encoded) if stage_levels_encoded else 0),
+                    "curriculum/stage_max_level": float(max(stage_levels_encoded) if stage_levels_encoded else 0),
+                })
+            
+            # 添加更多调试信息 - 确保都是数值类型
             if logs:
                 if 'loss' in logs:
-                    wandb_data["curriculum/current_loss"] = logs['loss']
+                    wandb_data["curriculum/current_loss"] = float(logs['loss'])
                 if 'reward' in logs:
-                    wandb_data["curriculum/current_reward"] = logs['reward']
+                    wandb_data["curriculum/current_reward"] = float(logs['reward'])
                 if 'learning_rate' in logs:
-                    wandb_data["curriculum/learning_rate"] = logs['learning_rate']
+                    wandb_data["curriculum/learning_rate"] = float(logs['learning_rate'])
+            
+            # 🔧 新增：阶段性能趋势 - 确保都是数值类型
+            if hasattr(self.curriculum_manager, 'stage_performance_history') and self.curriculum_manager.stage_performance_history:
+                history = self.curriculum_manager.stage_performance_history
+                if len(history) >= 2:
+                    recent_trend = float(history[-1] - history[-2])
+                    wandb_data["curriculum/performance_trend"] = recent_trend
+                    
+                if len(history) >= 3:
+                    recent_avg = float(np.mean(history[-3:]))
+                    wandb_data["curriculum/recent_3_avg_performance"] = recent_avg
+                    
+                    # 性能稳定性（最近3次的标准差）
+                    recent_std = float(np.std(history[-3:]))
+                    wandb_data["curriculum/performance_stability"] = recent_std
+                    
+                # 🔧 新增：更多性能统计
+                wandb_data.update({
+                    "curriculum/performance_history_length": int(len(history)),
+                    "curriculum/performance_min": float(min(history)),
+                    "curriculum/performance_max": float(max(history)),
+                    "curriculum/performance_range": float(max(history) - min(history)),
+                    "curriculum/performance_latest": float(history[-1]),
+                })
+                
+                # 计算性能改善趋势（如果有足够数据）
+                if len(history) >= 5:
+                    early_avg = float(np.mean(history[:2]))
+                    recent_avg = float(np.mean(history[-2:]))
+                    improvement = recent_avg - early_avg
+                    wandb_data["curriculum/performance_improvement"] = improvement
+            
+            # 🔧 新增：阶段名称的数值编码（用于图表显示）
+            stage_name_mapping = {
+                'foundation': 0.0,
+                'elementary': 1.0,
+                'intermediate': 2.0,
+                'advanced': 3.0,
+                'expert': 4.0,
+                'comprehensive': 5.0
+            }
+            
+            if current_stage_idx < len(self.curriculum_manager.curriculum_stages):
+                stage_name = self.curriculum_manager.curriculum_stages[current_stage_idx].name
+                stage_name_encoded = stage_name_mapping.get(stage_name.lower(), current_stage_idx)
+                wandb_data["curriculum/stage_name_encoded"] = float(stage_name_encoded)
+            else:
+                wandb_data["curriculum/stage_name_encoded"] = 6.0  # completed
+            
+            # 🔧 确保所有核心指标都是数值类型
+            wandb_data.update({
+                "curriculum/current_stage_idx": int(current_stage_idx),
+                "curriculum/current_stage_name_numeric": int(current_stage_idx),
+                "curriculum/dataset_size": int(dataset_size),
+                "curriculum/performance_threshold": float(performance_threshold),
+                "curriculum/latest_performance": float(latest_performance),
+                "curriculum/evaluation_count": int(stage_evaluation_count),
+                "curriculum/stage_step_count": int(self.step_count_in_current_stage),
+                "curriculum/avg_stage_performance": float(avg_stage_performance),
+                "curriculum/full_dataset_size": int(full_dataset_size),
+                "curriculum/stage_dataset_coverage_percent": float(stage_dataset_coverage),
+                "curriculum/cumulative_samples_trained": int(cumulative_samples_trained),
+                "curriculum/cumulative_coverage_percent": float(cumulative_coverage_percent),
+            })
             
             wandb.log(wandb_data, step=current_step)
             
@@ -715,3 +944,173 @@ class OptimizedCurriculumCallback(DefaultFlowCallback):
                 json.dump(state_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.warning(f"保存课程状态失败: {e}")
+
+class DatasetCoverageMonitorCallback(TrainerCallback):
+    """数据集覆盖率监控回调 - 确保所有数据都被使用"""
+    
+    def __init__(self, curriculum_manager, output_dir: Optional[str] = None):
+        self.curriculum_manager = curriculum_manager
+        self.output_dir = output_dir
+        self.used_sample_indices = set()
+        self.stage_sample_usage = {}
+        self.coverage_log_file = None
+        
+        if self.output_dir:
+            os.makedirs(self.output_dir, exist_ok=True)
+            self.coverage_log_file = os.path.join(self.output_dir, "dataset_coverage_monitor.txt")
+            
+            with open(self.coverage_log_file, 'w', encoding='utf-8') as f:
+                f.write(f"=== Dataset Coverage Monitor - {datetime.now()} ===\n")
+                f.write("监控数据集使用覆盖率\n")
+                f.write("="*80 + "\n")
+        
+        logger.info(f"✅ DatasetCoverageMonitorCallback initialized. Log: {self.coverage_log_file}")
+
+    def _write_coverage_log(self, message: str):
+        """写入覆盖率监控日志"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_message = f"[{timestamp}] COVERAGE: {message}"
+        
+        logger.info(log_message)
+        
+        if self.coverage_log_file:
+            try:
+                with open(self.coverage_log_file, 'a', encoding='utf-8') as f:
+                    f.write(log_message + "\n")
+            except Exception as e:
+                logger.warning(f"Failed to write coverage log: {e}")
+
+    def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        """训练开始时初始化覆盖率监控"""
+        if not self.curriculum_manager:
+            return
+            
+        self._write_coverage_log("🚀 开始监控数据集覆盖率")
+        
+        # 获取总数据集大小
+        total_samples = len(self.curriculum_manager.full_dataset)
+        self._write_coverage_log(f"📊 总数据集大小: {total_samples} 样本")
+        
+        # 分析每个阶段的理论覆盖情况
+        if hasattr(self.curriculum_manager, 'coverage_analysis'):
+            coverage = self.curriculum_manager.coverage_analysis
+            self._write_coverage_log(f"📈 理论覆盖率: {coverage['coverage_ratio']*100:.1f}%")
+            self._write_coverage_log(f"📈 理论覆盖样本: {coverage['covered_samples']}/{coverage['total_samples']}")
+            
+            if coverage['uncovered_count'] > 0:
+                self._write_coverage_log(f"⚠️ 警告: {coverage['uncovered_count']} 个样本未被任何阶段覆盖")
+
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, logs: Optional[Dict[str, float]] = None, **kwargs):
+        """记录当前阶段的数据使用情况"""
+        if not self.curriculum_manager or args.local_rank > 0:
+            return
+
+        current_step = getattr(state, 'global_step', 0) or 0
+        current_stage_idx = self.curriculum_manager.current_stage
+        
+        # 每100步记录一次覆盖率状态
+        if current_step % 100 == 0 and current_step > 0:
+            self._log_coverage_status(current_step, current_stage_idx)
+
+    def _log_coverage_status(self, step: int, stage_idx: int):
+        """记录覆盖率状态"""
+        if stage_idx >= len(self.curriculum_manager.curriculum_stages):
+            stage_name = "completed"
+            dataset_size = len(self.curriculum_manager.full_dataset)
+        else:
+            stage = self.curriculum_manager.curriculum_stages[stage_idx]
+            stage_name = stage.name
+            current_dataset = self.curriculum_manager.get_current_stage_dataset()
+            dataset_size = len(current_dataset)
+            
+            # 记录当前阶段使用的样本
+            if stage_name not in self.stage_sample_usage:
+                self.stage_sample_usage[stage_name] = set()
+            
+            # 这里需要更复杂的逻辑来跟踪实际使用的样本索引
+            # 目前只记录理论上的数据集大小
+        
+        total_samples = len(self.curriculum_manager.full_dataset)
+        coverage_ratio = dataset_size / total_samples if total_samples > 0 else 0
+        
+        self._write_coverage_log(f"📊 步数 {step} - 阶段 {stage_name}")
+        self._write_coverage_log(f"  - 当前阶段数据集: {dataset_size} 样本")
+        self._write_coverage_log(f"  - 当前阶段覆盖率: {coverage_ratio*100:.1f}%")
+        
+        # 累计覆盖率统计
+        total_used = sum(len(usage) for usage in self.stage_sample_usage.values())
+        cumulative_coverage = total_used / total_samples if total_samples > 0 else 0
+        self._write_coverage_log(f"  - 累计覆盖率: {cumulative_coverage*100:.1f}%")
+
+    def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        """训练结束时生成最终覆盖率报告"""
+        if not self.curriculum_manager:
+            return
+            
+        self._write_coverage_log("🏁 训练结束 - 生成最终覆盖率报告")
+        
+        total_samples = len(self.curriculum_manager.full_dataset)
+        
+        # 统计每个阶段的使用情况
+        self._write_coverage_log("📈 各阶段数据使用统计:")
+        for stage_name, usage in self.stage_sample_usage.items():
+            count = len(usage)
+            ratio = count / total_samples if total_samples > 0 else 0
+            self._write_coverage_log(f"  - {stage_name}: {count} 样本 ({ratio*100:.1f}%)")
+        
+        # 总体覆盖率
+        all_used = set()
+        for usage in self.stage_sample_usage.values():
+            all_used.update(usage)
+        
+        final_coverage = len(all_used) / total_samples if total_samples > 0 else 0
+        unused_count = total_samples - len(all_used)
+        
+        self._write_coverage_log(f"📊 最终覆盖率统计:")
+        self._write_coverage_log(f"  - 总样本数: {total_samples}")
+        self._write_coverage_log(f"  - 已使用样本: {len(all_used)} ({final_coverage*100:.1f}%)")
+        self._write_coverage_log(f"  - 未使用样本: {unused_count} ({(1-final_coverage)*100:.1f}%)")
+        
+        if unused_count > 0:
+            self._write_coverage_log(f"⚠️ 警告: {unused_count} 个样本在整个训练过程中从未被使用!")
+        else:
+            self._write_coverage_log("✅ 所有数据样本都被使用了")
+        
+        # 保存详细报告
+        self._save_detailed_coverage_report()
+
+    def _save_detailed_coverage_report(self):
+        """保存详细的覆盖率报告"""
+        if not self.output_dir:
+            return
+            
+        report_file = os.path.join(self.output_dir, "dataset_coverage_detailed_report.json")
+        
+        total_samples = len(self.curriculum_manager.full_dataset)
+        all_used = set()
+        for usage in self.stage_sample_usage.values():
+            all_used.update(usage)
+        
+        report_data = {
+            "timestamp": datetime.now().isoformat(),
+            "total_samples": total_samples,
+            "total_used_samples": len(all_used),
+            "final_coverage_ratio": len(all_used) / total_samples if total_samples > 0 else 0,
+            "unused_sample_count": total_samples - len(all_used),
+            "stage_usage": {
+                stage_name: {
+                    "sample_count": len(usage),
+                    "coverage_ratio": len(usage) / total_samples if total_samples > 0 else 0,
+                    "sample_indices": list(usage)
+                }
+                for stage_name, usage in self.stage_sample_usage.items()
+            },
+            "unused_sample_indices": list(set(range(total_samples)) - all_used)
+        }
+        
+        try:
+            with open(report_file, 'w', encoding='utf-8') as f:
+                json.dump(report_data, f, indent=2, ensure_ascii=False)
+            self._write_coverage_log(f"💾 详细覆盖率报告已保存: {report_file}")
+        except Exception as e:
+            self._write_coverage_log(f"❌ 保存覆盖率报告失败: {e}")

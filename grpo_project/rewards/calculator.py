@@ -99,7 +99,7 @@ try:
     from grpo_project.utils.file_ops import extract_module_info
     from grpo_project.utils.parsing import parse_llm_completion_qwen3
     from grpo_project.utils.verilog_utils import validate_verilog_code, assess_code_quality
-    from grpo_project.evaluation.simulator import VerilogSimulator # Import the new simulator
+    from grpo_project.evaluation.simulator import VerilogSimulator # Import the real simulator
     # Unused component imports FunctionalRewardComponent, CodeQualityRewardComponent are already removed/commented.
     # Unused run_iverilog_simulation import is already removed/commented.
 except ImportError:
@@ -121,6 +121,7 @@ except ImportError:
         efficiency_weight = 0.2
         readability_weight = 0.1
         robustness_weight = 0.1
+        length_efficiency_weight = 0.1
         # Default get_scaled_reward
         def get_scaled_reward(self, base_reward: float, training_step: int = 0) -> float: return base_reward
 
@@ -209,32 +210,44 @@ except ImportError:
     
     def validate_verilog_code(code: str, name: str, ports: list, config=None) -> tuple[bool, str]: return True, ""
     def assess_code_quality(code: str) -> Dict[str, float]: return {"efficiency": 0.0, "readability": 0.0, "complexity": 0.0, "structure": 0.0} # Added assess_code_quality placeholder
-    # Removed run_iverilog_simulation placeholder as it's no longer used
     
-    class VerilogSimulator: # type: ignore # Added placeholder for VerilogSimulator
-        def __init__(self, *args, **kwargs): pass
+    # 🔥 保留占位符仅作为fallback，优先使用真正的模拟器
+    class VerilogSimulator: # type: ignore # Fallback placeholder simulator
+        def __init__(self, *args, **kwargs): 
+            logger.warning("Using fallback placeholder VerilogSimulator - this should not happen in production!")
         def run_simulation(self, *args, **kwargs) -> Dict[str, Any]:
+            logger.error("⚠️  PLACEHOLDER SIMULATOR CALLED - No real simulation performed!")
             return {
                 "compilation_success": False, 
                 "simulation_run_success": False,
                 "parsing_success": False,
                 "passed_tests": 0,
                 "total_tests_in_output": 0,
-                "error_message": "Placeholder simulator error",
+                "error_message": "Placeholder simulator error - real simulator not available",
                 "all_tests_passed_by_tb": False
             }
-    # Placeholders for FunctionalRewardComponent and CodeQualityRewardComponent are already removed.
-
 
 logger = logging.getLogger(__name__)
 
 class RewardCalculator:
     def __init__(self, reward_config: EnhancedRewardConfig, simulator: Optional[VerilogSimulator] = None): # Changed Optional[Any] to Optional[VerilogSimulator]
         self.reward_config = reward_config
-        # If simulator is not passed, instantiate a default one using the (potentially placeholder) VerilogSimulator
-        self.simulator = simulator if simulator else VerilogSimulator()
+        # 🔥 优先使用传入的simulator，否则实例化真正的VerilogSimulator
+        if simulator:
+            self.simulator = simulator
+            logger.info("RewardCalculator initialized with provided VerilogSimulator.")
+        else:
+            try:
+                # 尝试实例化真正的VerilogSimulator
+                from grpo_project.evaluation.simulator import VerilogSimulator as RealVerilogSimulator
+                self.simulator = RealVerilogSimulator()
+                logger.info("✅ RewardCalculator initialized with REAL VerilogSimulator!")
+            except ImportError as e:
+                logger.error(f"❌ Failed to import real VerilogSimulator: {e}")
+                logger.warning("🔄 Falling back to placeholder simulator - training will not work properly!")
+                self.simulator = VerilogSimulator()  # fallback placeholder
         # self.functional_component and self.quality_component are already removed.
-        logger.info("RewardCalculator initialized.")
+        logger.info("RewardCalculator initialization complete.")
 
     def _calculate_single_reward(
         self,
@@ -247,7 +260,8 @@ class RewardCalculator:
         # wandb_callback: Optional[Any] = None, # wandb_callback from train.py's scope is not directly passed here
         output_dir_for_debug: Optional[str] = None,
         completion_idx: int = 0, # Added for consistency with original function
-        original_enhanced_prompt: Optional[str] = None  # 新增参数
+        original_enhanced_prompt: Optional[str] = None,  # 新增参数
+        tokenizer: Optional[Any] = None  # 新增tokenizer参数
     ) -> Dict[str, Any]:
 
         prompt_id_base = prompt_str.split('\n', 1)[0]
@@ -262,8 +276,56 @@ class RewardCalculator:
 
         log_pref = f"REWARD_CALC: '{prompt_id_for_log}', Completion {completion_idx}"
 
-        current_unscaled_components = {"functional": 0.0, "efficiency": 0.0, "readability": 0.0, "robustness": 0.0, "base_compilation": 0.0}
-        current_funnel_metrics = {"code_extracted": False, "compiled_successfully": False, "sim_ran_successfully": False, "passed_tests": -1}
+        current_unscaled_components = {"functional": 0.0, "efficiency": 0.0, "readability": 0.0, "robustness": 0.0, "base_compilation": 0.0, "length_efficiency": 0.0}
+        current_funnel_metrics = {"code_extracted": False, "compiled_successfully": False, "sim_ran_successfully": False, "passed_tests": -1, "output_token_count": 0}
+
+        # 计算输出长度奖励
+        output_token_count = 0
+        if tokenizer and completion_str:
+            try:
+                # 使用tokenizer计算token数量
+                tokens = tokenizer.encode(completion_str, add_special_tokens=False)
+                output_token_count = len(tokens)
+                current_funnel_metrics["output_token_count"] = output_token_count
+                
+                # 计算长度效率奖励
+                if output_token_count < self.reward_config.min_length_threshold:
+                    # 太短的输出给予惩罚
+                    current_unscaled_components["length_efficiency"] = self.reward_config.min_length_penalty
+                    logger.debug(f"{log_pref}: Output too short ({output_token_count} tokens), penalty applied")
+                elif output_token_count <= self.reward_config.length_efficiency_threshold:
+                    # 在高效范围内，给予奖励
+                    current_unscaled_components["length_efficiency"] = self.reward_config.optimal_length_bonus
+                    logger.debug(f"{log_pref}: Optimal length ({output_token_count} tokens), bonus applied")
+                elif output_token_count <= self.reward_config.length_penalty_threshold:
+                    # 中等长度，不给奖励也不惩罚
+                    current_unscaled_components["length_efficiency"] = 0.0
+                    logger.debug(f"{log_pref}: Medium length ({output_token_count} tokens), neutral")
+                else:
+                    # 超过阈值，给予惩罚
+                    excess_tokens = output_token_count - self.reward_config.length_penalty_threshold
+                    penalty = excess_tokens * self.reward_config.length_penalty_rate
+                    # 限制最大惩罚避免过度惩罚
+                    penalty = max(penalty, -5.0)
+                    current_unscaled_components["length_efficiency"] = penalty
+                    logger.debug(f"{log_pref}: Output too long ({output_token_count} tokens), penalty: {penalty:.3f}")
+                    
+            except Exception as e:
+                logger.warning(f"{log_pref}: Failed to calculate token count: {e}")
+                current_unscaled_components["length_efficiency"] = 0.0
+        else:
+            # 如果没有tokenizer，基于字符数估算
+            char_count = len(completion_str) if completion_str else 0
+            # 粗略估算：平均4个字符=1个token
+            estimated_tokens = char_count // 4
+            current_funnel_metrics["output_token_count"] = estimated_tokens
+            
+            if estimated_tokens > self.reward_config.length_penalty_threshold // 4:
+                excess_chars = char_count - (self.reward_config.length_penalty_threshold * 4)
+                penalty = (excess_chars // 4) * self.reward_config.length_penalty_rate
+                penalty = max(penalty, -3.0)
+                current_unscaled_components["length_efficiency"] = penalty
+                logger.debug(f"{log_pref}: Estimated long output ({estimated_tokens} tokens), penalty: {penalty:.3f}")
 
         # 从参考Verilog文件中提取模块信息
         module_name, req_ports = "", []
@@ -310,7 +372,8 @@ class RewardCalculator:
                             "timestamp": timestamp,
                             "task_id": task_id,
                             "issue_type": "missing_code_block",
-                            "penalty_applied": penalty_type
+                            "penalty_applied": penalty_type,
+                            "output_token_count": output_token_count
                         },
                         "prompts": {
                             "model_input_prompt": prompt_str,  # 模型实际接收的prompt
@@ -331,7 +394,8 @@ class RewardCalculator:
                             "penalty_type": "missing_code_block",
                             "penalty_value": penalty_type,
                             "scaled_reward": total_reward,
-                            "training_step": training_step
+                            "training_step": training_step,
+                            "length_efficiency_component": current_unscaled_components["length_efficiency"]
                         },
                         "file_references": {
                             "testbench_path": testbench_path,
@@ -374,7 +438,8 @@ class RewardCalculator:
                         f.write(f"时间戳: {timestamp}\n")
                         f.write(f"任务ID: {task_id}\n")
                         f.write(f"问题类型: 缺少代码块\n")
-                        f.write(f"惩罚值: {penalty_type}\n\n")
+                        f.write(f"惩罚值: {penalty_type}\n")
+                        f.write(f"输出token数: {output_token_count}\n\n")
                         
                         f.write("=== 模型输入Prompt ===\n")
                         f.write(prompt_str)
@@ -520,6 +585,7 @@ class RewardCalculator:
             self.reward_config.efficiency_weight * current_unscaled_components["efficiency"] +
             self.reward_config.readability_weight * current_unscaled_components["readability"] +
             self.reward_config.robustness_weight * current_unscaled_components["robustness"] +
+            self.reward_config.length_efficiency_weight * current_unscaled_components["length_efficiency"] +
             current_unscaled_components["base_compilation"] # This is the base for compilation success/failure
         )
 
@@ -529,13 +595,15 @@ class RewardCalculator:
         logger.info(
             f"{log_pref}: Unscaled Rewards: Functional={current_unscaled_components['functional']:.2f}, "
             f"Efficiency={current_unscaled_components['efficiency']:.2f}, Readability={current_unscaled_components['readability']:.2f}, "
-            f"Robustness={current_unscaled_components['robustness']:.2f}, Compilation={current_unscaled_components['base_compilation']:.2f}. "
+            f"Robustness={current_unscaled_components['robustness']:.2f}, LengthEff={current_unscaled_components['length_efficiency']:.2f}, "
+            f"Compilation={current_unscaled_components['base_compilation']:.2f}. "
             f"Total Unscaled: {unscaled_total_reward:.2f}. Final Scaled: {final_scaled_reward:.2f}"
         )
         logger.info(f"{log_pref}: Funnel Metrics: Code Extracted={current_funnel_metrics['code_extracted']}, "
                     f"Compiled Successfully={current_funnel_metrics['compiled_successfully']}, "
                     f"Sim Ran Successfully={current_funnel_metrics['sim_ran_successfully']}, "
-                    f"Passed Tests={current_funnel_metrics['passed_tests']}")
+                    f"Passed Tests={current_funnel_metrics['passed_tests']}, "
+                    f"Output Tokens={current_funnel_metrics['output_token_count']}")
 
 
         return {
@@ -558,6 +626,7 @@ class RewardCalculator:
         wandb_callback_obj: Optional[Any] = None,
         experience_buffer_obj: Optional[Any] = None,
         script_config_obj: Optional[Any] = None,
+        tokenizer: Optional[Any] = None,  # 新增tokenizer参数
         **kwargs  # 添加kwargs来捕获多余参数
     ) -> Tuple[List[float], Dict[str, Any]]:
 
@@ -624,7 +693,8 @@ class RewardCalculator:
                 training_step=training_step,
                 output_dir_for_debug=output_dir_for_debug,
                 completion_idx=i,
-                original_enhanced_prompt=original_enhanced_prompt  # 🔧 新增参数
+                original_enhanced_prompt=original_enhanced_prompt,  # 🔧 新增参数
+                tokenizer=tokenizer  # 🔧 新增tokenizer参数
             )
 
             batch_rewards_final_scaled.append(single_result["final_reward"])
@@ -652,7 +722,7 @@ class RewardCalculator:
         # Aggregate metrics for W&B (after loop)
         aggregated_metrics_for_wandb = {}
         if num_items_in_batch > 0:
-            component_keys = ["functional", "efficiency", "readability", "robustness", "base_compilation"]
+            component_keys = ["functional", "efficiency", "readability", "robustness", "base_compilation", "length_efficiency"]
             for key in component_keys:
                 values = [comp[key] for comp in batch_all_unscaled_components if key in comp and comp[key] is not None]
                 if values:
@@ -685,6 +755,25 @@ class RewardCalculator:
             else:
                 aggregated_metrics_for_wandb["generation_funnel/avg_passed_tests_on_success_sim_runs"] = 0.0
                 aggregated_metrics_for_wandb["generation_funnel/std_passed_tests_on_success_sim_runs"] = 0.0
+            
+            # 输出长度统计
+            output_token_counts = [fm.get("output_token_count", 0) for fm in batch_all_funnel_metrics]
+            if output_token_counts:
+                aggregated_metrics_for_wandb["output_length/avg_token_count"] = np.mean(output_token_counts)
+                aggregated_metrics_for_wandb["output_length/std_token_count"] = np.std(output_token_counts)
+                aggregated_metrics_for_wandb["output_length/max_token_count"] = np.max(output_token_counts)
+                aggregated_metrics_for_wandb["output_length/min_token_count"] = np.min(output_token_counts)
+                
+                # 统计不同长度范围的分布
+                short_outputs = sum(1 for count in output_token_counts if count < self.reward_config.min_length_threshold)
+                optimal_outputs = sum(1 for count in output_token_counts if self.reward_config.min_length_threshold <= count <= self.reward_config.length_efficiency_threshold)
+                medium_outputs = sum(1 for count in output_token_counts if self.reward_config.length_efficiency_threshold < count <= self.reward_config.length_penalty_threshold)
+                long_outputs = sum(1 for count in output_token_counts if count > self.reward_config.length_penalty_threshold)
+                
+                aggregated_metrics_for_wandb["output_length/short_outputs_ratio"] = short_outputs / num_items_in_batch
+                aggregated_metrics_for_wandb["output_length/optimal_outputs_ratio"] = optimal_outputs / num_items_in_batch
+                aggregated_metrics_for_wandb["output_length/medium_outputs_ratio"] = medium_outputs / num_items_in_batch
+                aggregated_metrics_for_wandb["output_length/long_outputs_ratio"] = long_outputs / num_items_in_batch
             
             aggregated_metrics_for_wandb["reward/batch_mean_final_scaled_reward"] = np.mean(batch_rewards_final_scaled) if batch_rewards_final_scaled else 0.0
             aggregated_metrics_for_wandb["reward/batch_std_final_scaled_reward"] = np.std(batch_rewards_final_scaled) if batch_rewards_final_scaled else 0.0

@@ -68,6 +68,10 @@ from grpo_project.callbacks.inference import DetailedInferenceCallback
 from grpo_project.callbacks.wandb import DetailedWandbCallback as TrainDetailedWandbCallback
 from grpo_project.curriculum.callbacks import CurriculumProgressCallback, EnhancedCurriculumDebugCallback, OptimizedCurriculumCallback
 from grpo_project.core.wandb_sync_manager import initialize_wandb_sync_manager, get_wandb_sync_manager
+from grpo_project.callbacks.hard_case_monitoring import HardCaseMonitoringCallback
+
+# Monitoring imports
+from grpo_project.monitoring import HardCaseMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +129,9 @@ class GRPOTrainingPipeline:
         self.trainer = None
         
         # 🔧 多GPU状态跟踪 - 注意：这些将在上面的方法中设置，不要在这里重复初始化
+
+        # 🔧 新增：初始化Hard-case监控器
+        self._setup_hard_case_monitor()
 
     def _detect_multi_gpu_environment(self):
         """🔧 检测并配置多GPU环境"""
@@ -1136,6 +1143,30 @@ class GRPOTrainingPipeline:
 
             logger.info(f"Total callbacks prepared: {len(self.callbacks)}")
             
+            # 🔧 新增：Hard-case监控回调
+            if (self.hard_case_monitor and 
+                self.hard_case_config and 
+                self.hard_case_config.get('enabled', False)):
+                
+                try:
+                    hard_case_callback = HardCaseMonitoringCallback(
+                        hard_case_monitor=self.hard_case_monitor,
+                        reward_calculator=self.reward_calculator,
+                        tokenizer=self.tokenizer,
+                        monitor_interval=self.hard_case_config.get('monitor_interval', 100),
+                        reference_verilog_dir=self.hard_case_config.get('reference_verilog_dir')
+                    )
+                    
+                    self.callbacks.append(hard_case_callback)
+                    logger.info(f"✅ Hard-case监控回调已添加 (间隔: {self.hard_case_config.get('monitor_interval', 100)} 步)")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Hard-case监控回调添加失败: {e}")
+            else:
+                logger.info("ℹ️ Hard-case监控器未启用或不可用")
+            
+            logger.info(f"Total callbacks prepared: {len(self.callbacks)}")
+            
         except Exception as e:
             logger.error(f"❌ Error setting up callbacks: {e}", exc_info=True)
             self.callbacks = [StepLoggingCallback()]
@@ -1172,7 +1203,8 @@ class GRPOTrainingPipeline:
                     "output_dir_for_debug": self.grpo_cfg.output_dir,
                     "wandb_callback_obj": getattr(self, 'wandb_callback', None),
                     "experience_buffer_obj": self.experience_buffer,
-                    "script_config_obj": self.script_cfg
+                    "script_config_obj": self.script_cfg,
+                    "tokenizer": self.tokenizer  # 🔧 新增tokenizer参数
                 }
                 
                 # 🔧 优化3: 快速奖励计算
@@ -1748,6 +1780,46 @@ class GRPOTrainingPipeline:
             
         except Exception as e:
             logger.warning(f"⚠️ Error during cleanup: {e}")
+
+    def _setup_hard_case_monitor(self):
+        """🔧 设置Hard-case测试案例监控器"""
+        try:
+            # 构建Hard-case目录路径
+            hard_case_dir = os.path.join(os.path.dirname(__file__), "Hard-case")
+            
+            # 检查目录是否存在
+            if not os.path.exists(hard_case_dir):
+                logger.warning(f"Hard-case目录不存在: {hard_case_dir}")
+                logger.info("如需启用Hard-case监控，请确保Hard-case目录存在")
+                self.hard_case_monitor = None
+                return
+            
+            # 创建监控输出目录
+            monitor_output_dir = os.path.join(self.grpo_cfg.output_dir, "hard_case_monitoring")
+            
+            # 初始化监控器
+            self.hard_case_monitor = HardCaseMonitor(
+                hard_case_dir=hard_case_dir,
+                output_dir=monitor_output_dir
+            )
+            
+            # 设置监控配置
+            self.hard_case_config = {
+                'monitor_interval': getattr(self.script_cfg, 'hard_case_monitor_interval', 100),  # 每100步监控一次
+                'enabled': True,
+                'reference_verilog_dir': None  # 如果有参考Verilog文件目录，可以在这里设置
+            }
+            
+            logger.info(f"✅ Hard-case监控器初始化成功")
+            logger.info(f"  - 测试案例目录: {hard_case_dir}")
+            logger.info(f"  - 监控输出目录: {monitor_output_dir}")
+            logger.info(f"  - 监控间隔: {self.hard_case_config['monitor_interval']} 步")
+            logger.info(f"  - 检测到测试案例: {list(self.hard_case_monitor.test_cases.keys()) if self.hard_case_monitor.test_cases else '无'}")
+            
+        except Exception as e:
+            logger.error(f"❌ Hard-case监控器初始化失败: {e}")
+            self.hard_case_monitor = None
+            self.hard_case_config = {'enabled': False}
 
 
 def main():

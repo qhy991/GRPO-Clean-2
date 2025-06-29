@@ -6,7 +6,7 @@ set -e
 # 🔧 激活conda环境
 echo "🔧 激活ReasoningV环境..."
 source /home/qhy/anaconda3/bin/activate ReasoningV
-export http_proxy=http://10.130.148.206:7890 https_proxy=http://10.130.148.206:7890
+export http_proxy=http://10.130.145.23:7890 https_proxy=http://10.130.145.23:7890
 # 清除分布式环境变量
 echo "🧹 清除分布式环境变量..."
 unset RANK 2>/dev/null || true
@@ -51,12 +51,13 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 export WANDB_PROJECT="VerilogGRPO_ModelParallel_Only"
 export WANDB_ENTITY="qhy0227-tsinghua-university"
 # 课程学习阈值
-CURRICULUM_PERFORMANCE_THRESHOLD_1=0.8
-CURRICULUM_PERFORMANCE_THRESHOLD_2=0.75
-CURRICULUM_PERFORMANCE_THRESHOLD_3=0.7
-CURRICULUM_PERFORMANCE_THRESHOLD_4=0.65
-CURRICULUM_PERFORMANCE_THRESHOLD_5=0.6
-CURRICULUM_MIN_EVALUATIONS=7
+CURRICULUM_PERFORMANCE_THRESHOLD_1=0.9
+CURRICULUM_PERFORMANCE_THRESHOLD_2=0.85
+CURRICULUM_PERFORMANCE_THRESHOLD_3=0.8
+CURRICULUM_PERFORMANCE_THRESHOLD_4=0.75
+CURRICULUM_PERFORMANCE_THRESHOLD_5=0.7
+CURRICULUM_PERFORMANCE_THRESHOLD_6=0.8  # 新增：comprehensive阶段阈值
+CURRICULUM_MIN_EVALUATIONS=5
 
 # 导出环境变量
 export CURRICULUM_PERFORMANCE_THRESHOLD_1
@@ -64,11 +65,12 @@ export CURRICULUM_PERFORMANCE_THRESHOLD_2
 export CURRICULUM_PERFORMANCE_THRESHOLD_3
 export CURRICULUM_PERFORMANCE_THRESHOLD_4
 export CURRICULUM_PERFORMANCE_THRESHOLD_5
+export CURRICULUM_PERFORMANCE_THRESHOLD_6  # 新增
 export CURRICULUM_MIN_EVALUATIONS
 
 BASE_MODEL_NAME_OR_PATH="/home/share/Qwen3-8B/models--Qwen--Qwen3-8B/snapshots/a80f5e57cce20e57b65145f4213844dec1a80834"
 STAGE1_ADAPTER_PATH="/home/share/ReasoningV/Qwen3/ckpts/sft-qwen3-lora-5epoch-origen200k-S1-20250429_211831/checkpoint-34695/"
-DATASET_PATH="/home/qhy/Research/LLM/GRPO-RV/dataset/all-with-module-2.jsonl"
+DATASET_PATH="/home/qhy/Research/LLM/GRPO-RV/dataset/all-with-module-2.clean-all.jsonl"
 DATASET_BASE_PATH="/home/qhy/Research/LLM/GRPO-RV/dataset"
 OUTPUT_DIR_BASE="./model_parallel_only_outputs"
 
@@ -117,6 +119,12 @@ WARMUP_RATIO=0.1
 LR_SCHEDULER_TYPE="cosine"
 WEIGHT_DECAY=0.01
 
+# 🎯 分层抽样配置（使用10%数据但保持各类别均衡）
+DATASET_SAMPLE_RATIO=1.0        # 采样比例：10%
+STRATIFY_COLUMNS="level,category"  # 分层字段
+MIN_SAMPLES_PER_CATEGORY=1      # 每个类别最少保留样本数
+SAMPLING_RANDOM_SEED=42         # 采样随机种子
+
 # 性能设置
 BF16_ENABLED=true
 FP16_ENABLED=false
@@ -129,7 +137,7 @@ DATALOADER_PIN_MEMORY=true  # 启用pin memory加速GPU传输
 DATALOADER_PREFETCH_FACTOR=8 # 增加预取因子
 
 # 🔧 优化GRPO和训练配置
-NUM_GENERATIONS_GRPO=4          # 增加生成数量以提高样本效率
+NUM_GENERATIONS_GRPO=8          # 增加生成数量以提高样本效率
 CALLBACK_NUM_SAMPLES=2          # 增加回调样本数
 CALLBACK_EVAL_EVERY_N_STEPS=25  # 减少评估频率以提高训练效率
 SAVE_STRATEGY="steps"
@@ -139,6 +147,7 @@ LOGGING_STEPS=1                 # 每步都记录日志 (5→1)
 
 # 🐛 详细DEBUG配置
 DEBUG_MODE=true                 # 启用详细debug模式
+HARD_CASE_MONITOR_INTERVAL=10   # 每10步监控一次Hard-case
 SAVE_ALL_GENERATIONS=true       # 保存所有生成的样本
 SAVE_FAILED_GENERATIONS=true    # 保存失败的生成样本
 SAVE_SUCCESSFUL_GENERATIONS=true # 保存成功的生成样本
@@ -187,6 +196,7 @@ export WANDB_TAGS="debug,model_parallel,lora,grpo,verilog"
 
 # 🐛 通过环境变量传递DEBUG配置 (避免参数解析错误)
 export DEBUG_MODE="${DEBUG_MODE}"
+export HARD_CASE_MONITOR_INTERVAL="${HARD_CASE_MONITOR_INTERVAL}"
 export SAVE_ALL_GENERATIONS="${SAVE_ALL_GENERATIONS}"
 export SAVE_FAILED_GENERATIONS="${SAVE_FAILED_GENERATIONS}"
 export SAVE_SUCCESSFUL_GENERATIONS="${SAVE_SUCCESSFUL_GENERATIONS}"
@@ -214,6 +224,12 @@ CMD_ARGS="${CMD_ARGS} --stage1_adapter_path \"${STAGE1_ADAPTER_PATH}\""
 CMD_ARGS="${CMD_ARGS} --dataset_path \"${DATASET_PATH}\""
 CMD_ARGS="${CMD_ARGS} --dataset_base_path \"${DATASET_BASE_PATH}\""
 CMD_ARGS="${CMD_ARGS} --output_dir_base \"${OUTPUT_DIR_BASE}\""
+
+# 🎯 分层抽样配置
+CMD_ARGS="${CMD_ARGS} --dataset_sample_ratio ${DATASET_SAMPLE_RATIO}"
+CMD_ARGS="${CMD_ARGS} --stratify_columns ${STRATIFY_COLUMNS}"
+CMD_ARGS="${CMD_ARGS} --min_samples_per_category ${MIN_SAMPLES_PER_CATEGORY}"
+CMD_ARGS="${CMD_ARGS} --sampling_random_seed ${SAMPLING_RANDOM_SEED}"
 
 # 🐛 DEBUG配置参数 (注意：移除了不支持的参数，但保留目录和环境配置)
 # 这些DEBUG参数在main.py的HfArgumentParser中未定义，所以暂时移除
@@ -303,6 +319,7 @@ CMD_ARGS="${CMD_ARGS} --report_to \"wandb\""
 CMD_ARGS="${CMD_ARGS} --remove_unused_columns False"
 CMD_ARGS="${CMD_ARGS} --optim \"${OPTIMIZER_TYPE}\""
 CMD_ARGS="${CMD_ARGS} --ddp_find_unused_parameters False"
+CMD_ARGS="${CMD_ARGS} --hard_case_monitor_interval ${HARD_CASE_MONITOR_INTERVAL}"
 
 # 缓存目录
 CACHE_DIR_BASE="${SCRIPT_DIR}/.model_parallel_cache"
@@ -347,7 +364,7 @@ echo ""
 echo "========================================================================"
 echo "                    纯模型并行GRPO训练启动"
 echo "========================================================================"
-log_info "🎯 优化后的LoRA训练配置摘要:"
+log_info "🎯 优化后的LoRA训练配置摘要 (分层抽样${DATASET_SAMPLE_RATIO//0./}%数据):"
 log_info "  - 模式: 纯模型并行（无FSDP，无DDP）"
 log_info "  - 启动方式: 直接python（单进程）"
 log_info "  - GPU配置: ${CUDA_VISIBLE_DEVICES}"
@@ -363,6 +380,14 @@ log_info "  - GRPO生成数: ${NUM_GENERATIONS_GRPO}"
 log_info "  - 课程检查间隔: ${CURRICULUM_PERFORMANCE_CHECK_INTERVAL}步"
 log_info "  - 数据加载器: ${DATALOADER_NUM_WORKERS} workers, prefetch=${DATALOADER_PREFETCH_FACTOR}"
 log_info "  - 输出目录: ${OUTPUT_DIR_BASE}"
+
+echo ""
+log_info "🎯 分层抽样配置:"
+log_info "  - 采样比例: ${DATASET_SAMPLE_RATIO} (仅使用${DATASET_SAMPLE_RATIO//0./}%的数据)"
+log_info "  - 分层字段: ${STRATIFY_COLUMNS} (确保各类别均衡)"
+log_info "  - 每类最少样本: ${MIN_SAMPLES_PER_CATEGORY}"
+log_info "  - 随机种子: ${SAMPLING_RANDOM_SEED}"
+log_info "  - 策略: 保持类别分布，避免训练偏差"
 
 echo ""
 log_info "📊 优化后的内存配置:"
@@ -473,6 +498,7 @@ log_info "  DEBUG_OUTPUT_BASE=${DEBUG_OUTPUT_BASE}"
 
 # 🐛 显式导出所有DEBUG环境变量
 export DEBUG_MODE
+export HARD_CASE_MONITOR_INTERVAL
 export SAVE_ALL_GENERATIONS
 export SAVE_FAILED_GENERATIONS
 export SAVE_SUCCESSFUL_GENERATIONS
